@@ -28,7 +28,6 @@ augroup HttpFiletypeRelated
   au BufNewFile,BufRead *.http set ft=http
 augroup END
 ]]
-
 ```
 
 ```http
@@ -53,8 +52,7 @@ Content-Type: application/json
 ### Set keymap
 
 ```lua
-
-    local http = require("http-nvim")
+local http = require("http-nvim")
 
 vim.keymap.set("n","<leader>rc",function()
     http.make_request()
