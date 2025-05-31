@@ -92,12 +92,12 @@ local build_curl = function(request)
                 table.insert(http_request.header, value)
             end
             if type == 'body' then
-                http_request.data = vim.json.decode(value)
+                _, http_request.data = pcall(vim.json.decode(value))
             end
         end
     end
 
-    local command = "curl --silent"
+    local command = "curl -L --no-progress-meter"
 
     if http_request.method ~= "GET" then
         command = command .. " -X " .. http_request.method
@@ -110,7 +110,7 @@ local build_curl = function(request)
     end
 
     if #(http_request.data) ~= 0 then
-        command = command .. " --json " .. vim.json.encode(http_request.data)
+        command = command .. " -d " .. vim.json.encode(http_request.data)
     end
 
     command = command .. " " .. http_request.url
@@ -166,6 +166,11 @@ M.make_request = function()
             end
             vim.bo[state.floats.body.buf].filetype = 'json'
             local ok, conform = pcall(require, "conform")
+
+            local ns = vim.api.nvim_create_namespace("result curl")
+            vim.api.nvim_buf_set_extmark(state.floats.header.buf, ns, 0, 0, {
+                virt_text = { { "" } }
+            })
 
             if ok then
                 conform.format({
