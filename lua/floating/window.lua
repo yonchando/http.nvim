@@ -1,14 +1,5 @@
 local M = {}
 
-local p = function(value, meta)
-    if meta then
-        print(vim.inspect(getmetatable(value)))
-    else
-        print(vim.inspect(value))
-    end
-end
-
-
 M.create_window_config = function()
     local width = math.floor(vim.o.columns * 0.5)
     local height = math.floor(vim.o.lines * 0.8)

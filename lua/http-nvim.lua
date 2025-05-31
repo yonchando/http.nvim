@@ -37,42 +37,91 @@ end
 local M = {}
 
 local state = {
-    floats = {}
+    floats = {},
+    open_request = false,
+    command = ""
 }
 
-local keymap = function(mode, key, callback)
-    vim.keymap.set(mode, key, callback, {
-        buffer = state.floats.body.buf
-    })
+local keymap = function(mode, key, callback, bufnr)
+    if bufnr then
+        vim.keymap.set(mode, key, callback, {
+            buffer = bufnr
+        })
+    else
+        vim.keymap.set(mode, key, callback, {
+            buffer = state.floats.body.buf
+        })
+    end
 end
 
 local http_request = {
     method = "",
     url = "",
     header = {},
-    data = {},
+    data = nil,
 }
 
 local create_output_ui = function()
     local window = floating.create_window_config()
+
     state.floats.background = floating.create_floating_window(window.background)
     state.floats.header = floating.create_floating_window(window.header)
     state.floats.body = floating.create_floating_window(window.body)
 
     vim.api.nvim_set_current_buf(state.floats.body.buf)
+
     vim.api.nvim_buf_set_lines(state.floats.header.buf, 0, -1, false, {
-        http_request.method .. " " .. http_request.url
+        " " .. http_request.method .. ": " .. http_request.url
     })
 
-    keymap('n', 'q', function()
+    local quit = function()
         vim.api.nvim_win_close(state.floats.header.win, false)
         vim.api.nvim_win_close(state.floats.body.win, false)
         vim.api.nvim_win_close(state.floats.background.win, false)
 
-
         vim.api.nvim_buf_delete(state.floats.header.buf, {})
         vim.api.nvim_buf_delete(state.floats.body.buf, {})
         vim.api.nvim_buf_delete(state.floats.background.buf, {})
+    end
+
+    keymap('n', 'q', quit)
+    keymap('n', '<ESC>', quit)
+
+    keymap('n', 'i', function()
+        if state.open_request == false then
+            state.open_request = true
+            local original_header = vim.api.nvim_buf_get_lines(state.floats.header.buf, 0, -1, true)
+            local original_body = vim.api.nvim_buf_get_lines(state.floats.body.buf, 0, -1, true)
+
+            local set_content = function()
+                vim.api.nvim_buf_set_lines(state.floats.header.buf, 0, -1, false, original_header)
+                vim.api.nvim_buf_set_lines(state.floats.body.buf, 0, -1, false, original_body)
+
+                state.open_request = false
+                keymap('n', 'q', quit)
+                keymap('n', '<ESC>', quit)
+            end
+
+            vim.api.nvim_buf_set_lines(state.floats.header.buf, 0, -1, false, {
+                "Info"
+            })
+
+            vim.api.nvim_buf_set_lines(state.floats.body.buf, 0, -1, false, {
+                "curl",
+                state.command,
+                "",
+                "Headers",
+                "",
+                vim.json.encode(http_request.header),
+                "---------------",
+                "",
+                "Request body",
+                "",
+            })
+
+            keymap('n', 'q', set_content)
+            keymap('n', '<ESC>', set_content)
+        end
     end)
 end
 
@@ -92,7 +141,7 @@ local build_curl = function(request)
                 table.insert(http_request.header, value)
             end
             if type == 'body' then
-                _, http_request.data = pcall(vim.json.decode(value))
+                http_request.data = value
             end
         end
     end
@@ -105,16 +154,70 @@ local build_curl = function(request)
 
     if #(http_request.header) ~= 0 then
         for _, v in pairs(http_request.header) do
-            command = command .. " --header " .. "'" .. v .. "'"
+            command = command .. " -H " .. "'" .. v .. "'"
         end
     end
 
-    if #(http_request.data) ~= 0 then
-        command = command .. " -d " .. vim.json.encode(http_request.data)
+    if http_request.data ~= nil then
+        local json = vim.json.decode(http_request.data)
+        local body = vim.json.encode(json)
+        command = command .. " --data-raw " .. "'" .. body .. "'"
     end
 
     command = command .. " " .. http_request.url
+
+    state.command = command
     return command
+end
+
+local run_command = function()
+    create_output_ui()
+
+    vim.api.nvim_buf_set_lines(state.floats.body.buf, -1, -1, false, {
+        "Loading ..."
+    })
+
+    local output = {}
+    local append = function(_, data)
+        if data then
+            table.insert(output, data)
+        end
+    end
+
+    vim.fn.jobstart(state.command, {
+        stdout_buffered = true,
+        on_stdout = append,
+        on_stderr = append,
+        on_exit = function()
+            vim.api.nvim_buf_set_lines(state.floats.body.buf, 0, -1, false, {})
+
+            for _, v in pairs(output) do
+                vim.api.nvim_buf_set_lines(state.floats.body.buf, -1, -1, false, v)
+            end
+
+            local lines = vim.api.nvim_buf_get_lines(state.floats.body.buf, 0, -1, false)
+
+            if lines[2] == '<!DOCTYPE html>' then
+                vim.bo[state.floats.body.buf].filetype = 'html'
+            else
+                vim.bo[state.floats.body.buf].filetype = 'json'
+                local ok, conform = pcall(require, "conform")
+
+                if ok then
+                    conform.format({
+                        async = true,
+                        lsp_fallback = true,
+                        timeout_ms = 50000,
+                    })
+                end
+            end
+
+            local ns = vim.api.nvim_create_namespace("result curl")
+            vim.api.nvim_buf_set_extmark(state.floats.header.buf, ns, 0, 0, {
+                virt_text = { { "" } }
+            })
+        end
+    })
 end
 
 M.make_request = function()
@@ -139,48 +242,20 @@ M.make_request = function()
         return
     end
 
-    local command = build_curl(request)
+    build_curl(request)
+    run_command()
+end
 
-    local output = {}
-    local append = function(_, data)
-        if data then
-            table.insert(output, data)
-        end
-    end
+M.run_last = function()
+    run_command()
+end
 
-    create_output_ui()
-
-    vim.api.nvim_buf_set_lines(state.floats.body.buf, -1, -1, false, {
-        "Loading ..."
-    })
-
-    vim.fn.jobstart(command, {
-        stdout_buffered = true,
-        on_stdout = append,
-        on_stderr = append,
-        on_exit = function()
-            vim.api.nvim_buf_set_text(state.floats.body.buf, 0, 0, -1, -1, {})
-
-            for _, v in pairs(output) do
-                vim.api.nvim_buf_set_lines(state.floats.body.buf, -1, -1, false, v)
-            end
-            vim.bo[state.floats.body.buf].filetype = 'json'
-            local ok, conform = pcall(require, "conform")
-
-            local ns = vim.api.nvim_create_namespace("result curl")
-            vim.api.nvim_buf_set_extmark(state.floats.header.buf, ns, 0, 0, {
-                virt_text = { { "" } }
-            })
-
-            if ok then
-                conform.format({
-                    async = true,
-                    lsp_fallback = true,
-                    timeout_ms = 50000,
-                })
-            end
-        end
-    })
+M.setup = function()
+    vim.cmd [[
+augroup ReqFiltypeRelated
+  au BufNewFile,BufRead *.http set ft=http
+augroup END
+]]
 end
 
 return M
