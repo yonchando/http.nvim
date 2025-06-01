@@ -2,6 +2,8 @@
 
 Simple http request for api json response in neovim
 
+> Noted POST request only with header has Content-Type: application/json
+
 ## Setup
 This plugins required `sudo apt install -y curl` and `:TSInstall http`
 
