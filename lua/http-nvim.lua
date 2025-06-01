@@ -13,7 +13,8 @@ local state = {
         url = "",
         header = {},
         data = {},
-    }
+    },
+    output = {},
 }
 
 local keymap = function(mode, key, callback, bufnr)
@@ -101,8 +102,8 @@ local create_output_ui = function()
             cmd.run_command(command_run, {
                 bufnr = body_buf,
                 filetype = 'json',
-                on_exit = function()
-                    vim.api.nvim_buf_set_lines(body_buf, -1, -1, false, {
+                append = function(bufnr)
+                    vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
                         command_run,
                         "",
                     })
@@ -140,12 +141,48 @@ M.make_request = function()
     state.curl = cmd.get_curl(request)
     state.command = cmd.build_curl({ curl = state.curl })
     create_output_ui()
-    cmd.run_command(state.command, { bufnr = state.floats.body.buf })
+    cmd.run_command(state.command, {
+        bufnr = state.floats.body.buf,
+        on_exit = function(output)
+            state.output = output
+        end
+    })
 end
 
 M.run_last = function()
     create_output_ui()
-    cmd.run_command(state.command, { bufnr = state.floats.body.buf })
+    cmd.run_command(state.command, {
+        bufnr = state.floats.body.buf,
+        on_exit = function(output)
+            state.output = output
+        end
+    })
+end
+
+M.last_result = function()
+    create_output_ui()
+
+    local bufnr = state.floats.body.buf
+    for _, v in pairs(state.output) do
+        vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, v)
+    end
+
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+
+    if lines[2] == '<!DOCTYPE html>' then
+        vim.bo[bufnr].filetype = 'html'
+    else
+        vim.bo[bufnr].filetype = 'json'
+        local ok, conform = pcall(require, "conform")
+
+        if ok then
+            conform.format({
+                async = true,
+                lsp_fallback = true,
+                timeout_ms = 50000,
+            })
+        end
+    end
 end
 
 M.setup = function()

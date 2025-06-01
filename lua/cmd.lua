@@ -30,8 +30,8 @@ M.run_command = function(command, opts)
         on_exit = function()
             vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {})
 
-            if opts.on_exit then
-                opts.on_exit()
+            if opts.append then
+                opts.append(bufnr)
             end
 
             for _, v in pairs(output) do
@@ -57,6 +57,10 @@ M.run_command = function(command, opts)
                         })
                     end
                 end
+            end
+
+            if opts.on_exit then
+                opts.on_exit(output)
             end
         end
     })
