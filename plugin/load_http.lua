@@ -8,7 +8,7 @@ vim.api.nvim_create_user_command("HttpResult", function()
     http.last_result()
 end, {})
 
-vim.api.nvim_create_user_command("HttpReRun", function()
+vim.api.nvim_create_user_command("HttpRerun", function()
     local http = require("http-nvim")
     http.rerun()
 end, {})
