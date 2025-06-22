@@ -1,3 +1,4 @@
+local log = require("log")
 local ts = vim.treesitter
 local M = {}
 
@@ -11,56 +12,23 @@ local get_node_text = function(node)
 end
 
 M.run_command = function(command, opts)
-    local bufnr = opts.bufnr
-    vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
-        "Loading ..."
-    })
-
     local output = {}
     local append = function(_, data)
         if data then
-            table.insert(output, data)
+            table.insert(output, data[1])
         end
     end
 
     vim.fn.jobstart(command, {
         stdout_buffered = true,
         on_stdout = append,
-        on_stderr = append,
         on_exit = function()
-            vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {})
+            if type(output[1]) == 'string' then
+                local response = vim.json.decode(output[1])
 
-            if opts.append then
-                opts.append(bufnr)
-            end
-
-            for _, v in pairs(output) do
-                vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, v)
-            end
-
-            local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-
-            if opts.filetype then
-                vim.bo[bufnr].filetype = opts.filetype
-            else
-                if lines[2] == '<!DOCTYPE html>' then
-                    vim.bo[bufnr].filetype = 'html'
-                else
-                    vim.bo[bufnr].filetype = 'json'
-                    local ok, conform = pcall(require, "conform")
-
-                    if ok then
-                        conform.format({
-                            async = true,
-                            lsp_fallback = true,
-                            timeout_ms = 50000,
-                        })
-                    end
+                if opts.on_exit then
+                    opts.on_exit(response)
                 end
-            end
-
-            if opts.on_exit then
-                opts.on_exit(output)
             end
         end
     })
@@ -111,25 +79,16 @@ end
 ---@param opts BuildCurl
 M.build_curl = function(opts)
     local curl = opts.curl
-    local command = "curl -L --no-progress-meter"
-    local is_content_json = false
+    local command = vim.fn.getcwd(0) .. "/http" .. " --url " .. curl.url
 
     if opts.curl_options then
         command = command .. opts.curl_options
     end
 
-    if curl.method ~= "GET" then
-        command = command .. " -X " .. curl.method
-    end
+    command = command .. " --method " .. curl.method
 
-    if #(curl.header) ~= 0 then
-        for _, v in pairs(curl.header) do
-            if v == 'Content-Type: application/json' then
-                is_content_json = true
-            end
-
-            command = command .. " -H " .. "'" .. v .. "'"
-        end
+    if #curl.header ~= 0 then
+        command = command .. " --header " .. "'" .. vim.json.encode(curl.header) .. "'"
     end
 
     local body = {}
@@ -138,12 +97,10 @@ M.build_curl = function(opts)
         table.insert(body, v)
     end
 
-    if #body and is_content_json then
+    if #body ~= 0 then
         local data = vim.json.encode(curl.data)
-        command = command .. " --data-raw " .. "'" .. data .. "'"
+        command = command .. " --data " .. "'" .. data .. "'"
     end
-
-    command = command .. " " .. curl.url
 
     return command
 end
