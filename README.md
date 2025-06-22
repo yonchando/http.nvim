@@ -2,7 +2,7 @@
 
 Simple http request for api json response in neovim
 
-> Noted POST request only with header has Content-Type: application/json
+> Noted POST request doesn't work when cursor in body content
 
 ## Setup
 This plugins required `sudo apt install -y curl` and `:TSInstall http`
@@ -48,5 +48,12 @@ Content-Type: application/json
 
 ```
 
-`:HttpRun` it run http request under cursor or setup your keymap
+`:HttpRun` run http request under cursor
 
+`:HttpResult` view recently request
+
+`:HttpRerun` re-run recently run
+
+`:HttpClose` close buffer popup
+
+`:HttpHistory` View all request
