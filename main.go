@@ -99,7 +99,6 @@ func main() {
 
 	if header.ContentType != "" {
 		req.Header.Set("Content-Type", header.ContentType)
-		fmt.Println(req.Header.Get("Content-Type"))
 	}
 	if header.Accept != "" {
 		req.Header.Set("Accept", header.Accept)

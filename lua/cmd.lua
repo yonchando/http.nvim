@@ -23,11 +23,16 @@ M.run_command = function(command, opts)
         stdout_buffered = true,
         on_stdout = append,
         on_exit = function()
+            log.info(output)
             if type(output[1]) == 'string' then
-                local response = vim.json.decode(output[1])
+                local ok, response = pcall(vim.json.decode(output[1]))
 
                 if opts.on_exit then
-                    opts.on_exit(response)
+                    if ok then
+                        opts.on_exit(response)
+                    else
+                        log.error(ok)
+                    end
                 end
             end
         end
@@ -79,7 +84,7 @@ end
 ---@param opts BuildCurl
 M.build_curl = function(opts)
     local curl = opts.curl
-    local command = vim.fn.getcwd(0) .. "/http" .. " --url " .. curl.url
+    local command = "./" .. vim.fn.getcwd(0) .. "/http" .. " --url " .. curl.url
 
     if opts.curl_options then
         command = command .. opts.curl_options
