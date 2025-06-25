@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 
 	"github.com/alexflint/go-arg"
@@ -30,15 +29,8 @@ type response struct {
 	Content    any                 `json:"body"`
 }
 
-func (res *response) setRequest(body io.ReadCloser) *response {
-	reader, err := io.ReadAll(body)
-
-	if err != nil {
-		res.setStatusCode(500).setContent(err).write()
-	}
-
-	res.Request = string(reader)
-
+func (res *response) setRequest(body string) *response {
+	res.Request = body
 	return res
 }
 

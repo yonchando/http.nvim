@@ -33,7 +33,7 @@ func makeResponse(httpResponse *http.Response, response response) {
 
 	body, err := io.ReadAll(httpResponse.Body)
 
-	if err != nil {
+	if err != nil && httpResponse.StatusCode != 200 {
 		response.setStatusCode(httpResponse.StatusCode).setContent(map[string]string{
 			"error": err.Error(),
 		}).write()
@@ -43,7 +43,7 @@ func makeResponse(httpResponse *http.Response, response response) {
 	var content any
 	err = json.Unmarshal(body, &content)
 
-	if err != nil {
+	if err != nil && httpResponse.StatusCode != 200 {
 		response.setStatusCode(httpResponse.StatusCode).setContent(map[string]string{
 			"error": err.Error(),
 		}).write()
@@ -82,6 +82,8 @@ func postRequest() {
 		Request:    args.Data,
 	}
 
+	response.setRequest(args.Data)
+
 	req, err := http.NewRequest("POST", args.URL, strings.NewReader(args.Data))
 
 	if err != nil {
@@ -107,6 +109,8 @@ func putRequest() {
 		Content:    nil,
 	}
 
+	response.setRequest(args.Data)
+
 	req, err := http.NewRequest("PUT", args.URL, strings.NewReader(args.Data))
 
 	if err != nil {
@@ -131,6 +135,8 @@ func patchRequest() {
 		StatusCode: 200,
 		Content:    nil,
 	}
+
+	response.setRequest(args.Data)
 
 	req, err := http.NewRequest("PATCH", args.URL, strings.NewReader(args.Data))
 
