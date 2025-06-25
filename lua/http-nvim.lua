@@ -110,6 +110,7 @@ M.setup = function()
     local cmd_path = vim.fn.stdpath("data") .. "/lazy/http.nvim/http"
     local clone_cmd_path = vim.fn.stdpath("data") .. "/http.nvim"
 
+    ---@diagnostic disable-next-line: undefined-field
     local fs_stat = vim.loop.fs_stat(clone_cmd_path)
 
     if fs_stat == nil then
