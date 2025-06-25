@@ -114,6 +114,7 @@ M.setup = function()
     local fs_stat = vim.loop.fs_stat(clone_cmd_path)
 
     if fs_stat == nil then
+        vim.cmd("silent !rm -rf " .. clone_cmd_path)
         vim.cmd("silent !mkdir -p " .. clone_cmd_path)
         vim.cmd("silent !cp " .. cmd_path .. " " .. clone_cmd_path .. "/http")
         vim.cmd("silent !chmod +x " .. clone_cmd_path .. "/http")
