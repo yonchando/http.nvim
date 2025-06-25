@@ -5,67 +5,67 @@ local M = {}
 ---@param node TSNode|nil
 ---@return string|nil
 local get_node_text = function(node)
-  if node ~= nil then
-    return ts.get_node_text(node, 0)
-  end
-  return nil
+    if node ~= nil then
+        return ts.get_node_text(node, 0)
+    end
+    return nil
 end
 
 M.run_command = function(command, opts)
-  local output = {}
-  local append = function(_, data)
-    if data then
-      table.insert(output, data[1])
-    end
-  end
-
-  vim.fn.jobstart(command, {
-    stdout_buffered = true,
-    on_stdout = append,
-    on_stderr = append,
-    on_exit = function()
-      for _, value in pairs(output) do
-        local ok, response = pcall(vim.json.decode, value)
-
-        if opts.on_exit then
-          if ok then
-            opts.on_exit(response)
-          end
+    local output = {}
+    local append = function(_, data)
+        if data then
+            table.insert(output, data[1])
         end
-      end
     end
-  })
+
+    vim.fn.jobstart(command, {
+        stdout_buffered = true,
+        on_stdout = append,
+        on_stderr = append,
+        on_exit = function()
+            for _, value in pairs(output) do
+                local ok, response = pcall(vim.json.decode, value)
+
+                if opts.on_exit then
+                    if ok then
+                        opts.on_exit(response)
+                    end
+                end
+            end
+        end
+    })
 end
 
 ---@param request TSNode
 M.get_curl = function(request)
-  local curl = {
-    method = "",
-    url = "",
-    header = {},
-    data = {}
-  }
+    local curl = {
+        method = "",
+        url = "",
+        header = {},
+        data = {}
+    }
 
-  for n, type in request:iter_children() do
-    local value = get_node_text(n)
+    for n, type in request:iter_children() do
+        local value = get_node_text(n)
 
-    if value ~= nil then
-      if type == 'method' then
-        curl.method = value
-      end
-      if type == 'url' then
-        curl.url = value
-      end
-      if type == 'header' then
-        table.insert(curl.header, value)
-      end
-      if type == 'body' then
-        curl.data = vim.json.decode(value)
-      end
+        if value ~= nil then
+            if type == 'method' then
+                curl.method = value
+            end
+            if type == 'url' then
+                curl.url = value
+            end
+            if type == 'header' then
+                table.insert(curl.header, value)
+            end
+            if type == 'body' then
+                curl.data = vim.json.decode(value)
+            end
+        end
     end
-  end
 
-  return curl
+    return curl
 end
 
 
@@ -81,32 +81,32 @@ end
 
 ---@param opts BuildCurl
 M.build_curl = function(opts)
-  local curl = opts.curl
-  local cmd = vim.fn.stdpath("data") .. "/lazy/http.nvim/http"
-  local command = cmd .. " --url " .. curl.url
+    local curl = opts.curl
+    local cmd = vim.fn.stdpath("data") .. "/http.nvim/http"
+    local command = cmd .. " --url " .. curl.url
 
-  if opts.curl_options then
-    command = command .. opts.curl_options
-  end
+    if opts.curl_options then
+        command = command .. opts.curl_options
+    end
 
-  command = command .. " --method " .. curl.method
+    command = command .. " --method " .. curl.method
 
-  if #curl.header ~= 0 then
-    command = command .. " --header " .. "'" .. vim.json.encode(curl.header) .. "'"
-  end
+    if #curl.header ~= 0 then
+        command = command .. " --header " .. "'" .. vim.json.encode(curl.header) .. "'"
+    end
 
-  local body = {}
+    local body = {}
 
-  for _, v in pairs(curl.data) do
-    table.insert(body, v)
-  end
+    for _, v in pairs(curl.data) do
+        table.insert(body, v)
+    end
 
-  if #body ~= 0 then
-    local data = vim.json.encode(curl.data)
-    command = command .. " --data " .. "'" .. data .. "'"
-  end
+    if #body ~= 0 then
+        local data = vim.json.encode(curl.data)
+        command = command .. " --data " .. "'" .. data .. "'"
+    end
 
-  return command
+    return command
 end
 
 return M
