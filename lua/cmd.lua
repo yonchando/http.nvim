@@ -14,28 +14,40 @@ end
 M.run_command = function(command, opts)
     local output = {}
     local append = function(_, data)
+        if data[1] ~= "" then
+            table.insert(output, data[1])
+        end
+    end
+
+    local errs = {}
+    local errors = function(_, data)
         if data then
-            table.insert(output, data)
+            table.insert(errs, data)
         end
     end
 
     vim.fn.jobstart(command, {
         stdout_buffered = true,
         on_stdout = append,
-        on_stderr = append,
+        on_stderr = errors,
         on_exit = function()
-            for _, value in pairs(output) do
-                local ok, response = pcall(vim.json.decode, value[1])
+            local data = vim.deepcopy(output)
 
-                if opts.on_exit then
-                    if ok then
-                        opts.on_exit(response)
-                        return
+            if not vim.tbl_isempty(data) then
+                for _, value in pairs(data) do
+                    local ok, response = pcall(vim.json.decode, value)
+
+                    log.info({ value = value[1], ok = ok })
+
+                    if opts.on_exit then
+                        if ok then
+                            opts.on_exit(response)
+                        end
                     end
                 end
+            else
+                log.error(errs)
             end
-
-            log.warn(output)
         end
     })
 end
@@ -109,7 +121,6 @@ M.build_curl = function(opts)
         command = command .. ' --data ' .. "'" .. data .. "'"
     end
 
-    log.info(command)
     return command
 end
 
