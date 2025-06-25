@@ -37,11 +37,12 @@ M.run_command = function(command, opts)
                 for _, value in pairs(data) do
                     local ok, response = pcall(vim.json.decode, value)
 
-                    log.info({ value = value[1], ok = ok })
 
                     if opts.on_exit then
                         if ok then
                             opts.on_exit(response)
+                        else
+                            log.info({ value = value, decode = ok })
                         end
                     end
                 end
