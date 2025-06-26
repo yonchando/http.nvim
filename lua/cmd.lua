@@ -122,7 +122,6 @@ M.build_curl = function(opts)
         command = command .. ' --data ' .. "'" .. data .. "'"
     end
 
-    log.info(command)
     return command
 end
 
