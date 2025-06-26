@@ -99,7 +99,7 @@ end
 M.build_curl = function(opts)
     local curl = opts.curl
     local cmd = vim.fn.stdpath("data") .. "/http.nvim/http"
-    local command = cmd .. " --url " .. curl.url
+    local command = cmd .. " --url " .. "'" .. curl.url .. "'"
 
     if opts.curl_options then
         command = command .. opts.curl_options
@@ -122,6 +122,7 @@ M.build_curl = function(opts)
         command = command .. ' --data ' .. "'" .. data .. "'"
     end
 
+    log.info(command)
     return command
 end
 
