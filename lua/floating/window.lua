@@ -1,5 +1,12 @@
 local M = {}
 
+
+--- @class WindowConfig
+--- @field background vim.api.keyset.win_config
+--- @field header vim.api.keyset.win_config
+--- @field body vim.api.keyset.win_config
+
+--- @return WindowConfig
 M.create_window_config = function()
     local width = math.floor(vim.o.columns * 0.5)
     local height = math.floor(vim.o.lines * 0.8)
@@ -47,7 +54,12 @@ end
 M.create_floating_window = function(win_config)
     local buf = vim.api.nvim_create_buf(false, true)
 
+
     local win = vim.api.nvim_open_win(buf, true, win_config)
+
+    vim.api.nvim_set_option_value('wrap', true, {
+        win = win,
+    })
 
     return { buf = buf, win = win }
 end
