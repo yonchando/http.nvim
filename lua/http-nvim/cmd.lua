@@ -1,4 +1,4 @@
-local log = require("log")
+local log = require("http-nvim.log")
 local ts = vim.treesitter
 local M = {}
 

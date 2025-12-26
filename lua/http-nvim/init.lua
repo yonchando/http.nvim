@@ -1,7 +1,7 @@
 local ts_utils = require("nvim-treesitter.ts_utils")
-local cmd = require('cmd')
-local ui = require('ui')
-local log = require("log")
+local cmd = require('http-nvim.cmd')
+local ui = require('http-nvim.ui')
+local log = require("http-nvim.log")
 
 local M = {}
 

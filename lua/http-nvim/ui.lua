@@ -1,5 +1,5 @@
-local floating = require("floating.window")
-local log = require("log")
+local floating = require("http-nvim.floating.window")
+local log = require("http-nvim.log")
 
 local M = {}
 local floats = {}
