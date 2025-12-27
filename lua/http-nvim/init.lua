@@ -1,4 +1,3 @@
-local ts_utils = require("nvim-treesitter.ts_utils")
 local cmd = require('http-nvim.cmd')
 local ui = require('http-nvim.ui')
 local log = require("http-nvim.log")
@@ -34,25 +33,18 @@ local get_request = function(node)
 end
 
 M.make_request = function()
-    local node = ts_utils.get_node_at_cursor(0)
+    -- local node = tree.get_node_at_cursor(0)
+    local node = vim.treesitter.get_node()
 
     if node == nil then
         log.error("No treesitter parser, Please use :TSInstall http")
         return
     end
 
-    local request = nil
+    local request = get_request(node)
 
-    if node:type() == 'request_separator' then
-        request = node:next_sibling()
-    elseif node:type() == 'value' and node:parent():type() == 'request_separator' then
-        request = node:parent():next_sibling()
-    else
-        request = get_request(node)
-    end
-
-    if request == nil or request:type() == 'document' then
-        log.warn("Try again with cursor outside body")
+    if request == nil then
+        log.warn("can not find document request")
         return
     end
 

@@ -2,7 +2,20 @@ local floating = require("http-nvim.floating.window")
 local log = require("http-nvim.log")
 
 local M = {}
-local floats = {}
+local floats = {
+    header = {
+        buf = -1,
+        win = -1
+    },
+    body = {
+        buf = -1,
+        win = -1
+    },
+    background = {
+        buf = -1,
+        win = -1
+    },
+}
 local open_request = false
 
 local keymap = function(mode, key, callback, bufnr)
@@ -45,13 +58,29 @@ M.define_keymapping = function(self, bufnr, state)
 end
 
 M.quit = function()
-    vim.api.nvim_win_close(floats.header.win, false)
-    vim.api.nvim_win_close(floats.body.win, false)
-    vim.api.nvim_win_close(floats.background.win, false)
+    if vim.api.nvim_win_is_valid(floats.header.win) then
+        vim.api.nvim_win_close(floats.header.win, false)
+    end
 
-    vim.api.nvim_buf_delete(floats.header.buf, {})
-    vim.api.nvim_buf_delete(floats.body.buf, {})
-    vim.api.nvim_buf_delete(floats.background.buf, {})
+    if vim.api.nvim_win_is_valid(floats.body.win) then
+        vim.api.nvim_win_close(floats.body.win, false)
+    end
+
+    if vim.api.nvim_win_is_valid(floats.background.win) then
+        vim.api.nvim_win_close(floats.background.win, false)
+    end
+
+    if vim.api.nvim_buf_is_valid(floats.header.buf) then
+        vim.api.nvim_buf_delete(floats.header.buf, {})
+    end
+
+    if vim.api.nvim_buf_is_valid(floats.body.buf) then
+        vim.api.nvim_buf_delete(floats.body.buf, {})
+    end
+
+    if vim.api.nvim_buf_is_valid(floats.background.buf) then
+        vim.api.nvim_buf_delete(floats.background.buf, {})
+    end
 end
 
 ---@param bufnr integer
@@ -67,6 +96,8 @@ M.nvim_buf_set_lines = function(bufnr, start, end_, strict_indexing, replacement
 end
 
 M.create_output_ui = function(self, state)
+    self:quit()
+
     local window = floating.create_window_config()
 
     floats.background = floating.create_floating_window(window.background)

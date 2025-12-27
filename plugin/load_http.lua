@@ -1,12 +1,9 @@
 local function reload()
     package.loaded["http-nvim"] = nil
-    package.loaded["ui"] = nil
-    package.loaded["cmd"] = nil
-    package.loaded["floating.window"] = nil
 end
 
 vim.api.nvim_create_user_command("HttpRun", function()
-    -- reload()
+    reload()
     local http = require("http-nvim")
     http.make_request()
 end, {})
