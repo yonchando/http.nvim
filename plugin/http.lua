@@ -1,6 +1,6 @@
 local http = require("http-nvim")
 
-vim.keymap.set("n", "<leader>rr", function()
+vim.keymap.set("n", "<leader>ho", function()
     http.open()
 end)
 

@@ -15,8 +15,7 @@ http-nvim helps you do something useful.
 ==============================================================================
 2. KEYMAPS                                             *http-nvim-keymaps*
 
-<leader>rr                  open your collection resapi.
-g?                  Open this help page.
+<leader>ho          Open your collection RESTApi
 <CR> or =           Expand or collapse the collection or folder under the
                     cursor.
 e                   Edit the request under the cursor in JetBrains HTTP
