@@ -43,6 +43,20 @@ D                   Delete the request or folder (with everything in it)
                     under the cursor, after confirming.
                     Edit buffers of the deleted requests are closed;
                     the prompt warns if any has unsaved changes.
+x                   Cut the request or folder under the cursor, to move
+                    it with |p|. Nothing changes until you paste; the cut
+                    item is underlined (`httpNvimCut`).
+y                   Copy the request or folder under the cursor, to
+                    duplicate it with |p|. The copied item is underlined
+                    (`httpNvimCopy`).
+p                   Paste into the folder under the cursor, or to the top
+                    level on any other line (including a request).
+                    After |x| the item is moved and open edit buffers
+                    follow the new path. After |y| a copy is added,
+                    named `name copy` (`name copy 2`, ...) if the name is
+                    taken; the copy stays on the clipboard so |p| can
+                    paste it again.
+<Esc>               Cancel the cut or copy started with |x| or |y|.
 u                   Undo the last deletion, putting the request or folder
                     back where it was and expanding the folders that hold
                     it. Repeat to undo older deletions.
@@ -70,5 +84,7 @@ vim-fugitive. Override any of them with |:highlight|.
   httpNvimFold         Expand/collapse marker `▸`/`▾`    links to Special
   httpNvimMethod       Request method, e.g. `GET`       links to Keyword
   httpNvimRequest      Request name                    not linked
+  httpNvimCut          Item cut with |x|                underlined
+  httpNvimCopy         Item copied with |y|             links to httpNvimCut
 
  vim:tw=78:ts=8:ft=help:norl:

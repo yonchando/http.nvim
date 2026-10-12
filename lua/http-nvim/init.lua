@@ -36,6 +36,7 @@ local jetbrains = require("http-nvim.jetbrains")
 ---@field line_lists table<integer, PostmanItem[]> The list that holds the item on each line
 ---@field deleted DeletedItem[] Deleted folders and requests, most recent last, for `u`
 ---@field edit_bufs table<PostmanItem, integer> Edit buffer of each request opened with `e`
+---@field clipboard { node: PostmanItem, mode: "cut"|"copy" }|nil Item marked with `x` (cut) or `y` (copy), pasted by `p`
 local state = {
     split = nil,
     collection = nil,
@@ -45,10 +46,13 @@ local state = {
     line_paths = {},
     line_lists = {},
     edit_bufs = {},
+    clipboard = nil,
     deleted = {},
 }
 
 local M = {}
+
+local ns = vim.api.nvim_create_namespace("http-nvim")
 
 -- TODO: let users choose collection files; for now load the test fixture
 local collection_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h:h") .. "/tests/api.json"
@@ -218,6 +222,20 @@ local function render()
     vim.bo[bufnr].modifiable = true
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
     vim.bo[bufnr].modifiable = false
+
+    -- Underline the item marked with `x` or `y`
+    vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+    local clip = state.clipboard
+    for line, node in pairs(state.line_nodes) do
+        if clip and node == clip.node then
+            local text = lines[line]
+            vim.api.nvim_buf_set_extmark(bufnr, ns, line - 1, #text:match("^%s*"), {
+                end_col = #text,
+                hl_group = clip.mode == "cut" and "httpNvimCut" or "httpNvimCopy",
+            })
+            break
+        end
+    end
 end
 
 ---@param node Node
@@ -296,6 +314,136 @@ local function rename_item()
         render()
         move_cursor_to(node)
     end)
+end
+
+--- Find where `node` currently sits in the collection.
+---@param node PostmanItem
+---@return PostmanItem[]|nil list, integer|nil index, string|nil path Slash-separated, ending with the node's name
+local function locate(node)
+    local function search(list, prefix)
+        for i, item in ipairs(list) do
+            local path = prefix .. item.name
+            if item == node then
+                return list, i, path
+            end
+            if item.item then
+                local found_list, found_index, found_path = search(item.item, path .. "/")
+                if found_list then
+                    return found_list, found_index, found_path
+                end
+            end
+        end
+    end
+    return search(state.items, "")
+end
+
+---@param mode "cut"|"copy"
+local function clip_item(mode)
+    local node = state.line_nodes[vim.api.nvim_win_get_cursor(0)[1]]
+    if not node then
+        return
+    end
+    state.clipboard = { node = node, mode = mode }
+    render()
+    vim.notify("http-nvim: " .. node.name .. " added to clipboard")
+end
+
+local function cancel_clipboard()
+    if not state.clipboard then
+        return
+    end
+    state.clipboard = nil
+    render()
+end
+
+--- `name`, or `name copy`, `name copy 2`, ... when `list` already has it.
+---@param list PostmanItem[]
+---@param name string
+---@return string
+local function unique_name(list, name)
+    local taken = {}
+    for _, item in ipairs(list) do
+        taken[item.name] = true
+    end
+    local candidate, n = name, 1
+    while taken[candidate] do
+        candidate = name .. " copy" .. (n > 1 and " " .. n or "")
+        n = n + 1
+    end
+    return candidate
+end
+
+--- Paste the item from `x` (move it) or `y` (copy it) into the folder under the
+--- cursor, or to the top level on any other line.
+local function paste_item()
+    local clip = state.clipboard
+    if not clip then
+        vim.notify("http-nvim: Clipboard empty! nothing to paste")
+        return
+    end
+    local node = clip.node
+
+    local target = state.line_nodes[vim.api.nvim_win_get_cursor(0)[1]]
+    if target and target.request then
+        target = nil
+    end
+    local to = state.items
+    local target_path = ""
+    if target then
+        local _, _, path = locate(target)
+        target.item = target.item or {}
+        to, target_path = target.item, path .. "/"
+    end
+
+    if clip.mode == "copy" then
+        -- The clipboard is kept so the same item can be pasted again
+        local copy = vim.deepcopy(node)
+        copy.name = unique_name(to, copy.name)
+        table.insert(to, copy)
+        if target then
+            state.expanded[target] = true
+        end
+        write_collection(collection_path)
+        render()
+        move_cursor_to(copy)
+        return
+    end
+
+    local from, index = locate(node)
+    if not from or not index then
+        state.clipboard = nil
+        render()
+        vim.notify("http-nvim: '" .. node.name .. "' no longer exists", vim.log.levels.ERROR)
+        return
+    end
+    if to == from then
+        state.clipboard = nil
+        render()
+        return
+    end
+    -- A folder cannot go inside itself or one of its own folders
+    local _, _, node_path = locate(node)
+    if not node.request and target_path:sub(1, #node_path + 1) == node_path .. "/" then
+        vim.notify("http-nvim: cannot move '" .. node.name .. "' into itself", vim.log.levels.ERROR)
+        return
+    end
+    for _, sibling in ipairs(to) do
+        if sibling.name == node.name then
+            vim.notify("http-nvim: '" .. node.name .. "' already exists there", vim.log.levels.ERROR)
+            return
+        end
+    end
+
+    table.remove(from, index)
+    table.insert(to, node)
+    state.clipboard = nil
+    if target then
+        state.expanded[target] = true
+    end
+    rename_edit_bufs(node, target_path .. node.name, false)
+    write_collection(collection_path)
+    render()
+    move_cursor_to(node)
 end
 
 --- Where a new item goes: inside the folder under the cursor, next to the request
@@ -612,6 +760,10 @@ M.open = function()
     vim.keymap.set("n", "<CR>", toggle, { buffer = state.split.bufnr })
     vim.keymap.set("n", "=", toggle, { buffer = state.split.bufnr })
     vim.keymap.set("n", "a", create_item, { buffer = state.split.bufnr })
+    vim.keymap.set("n", "x", function() clip_item("cut") end, { buffer = state.split.bufnr })
+    vim.keymap.set("n", "y", function() clip_item("copy") end, { buffer = state.split.bufnr })
+    vim.keymap.set("n", "p", paste_item, { buffer = state.split.bufnr })
+    vim.keymap.set("n", "<Esc>", cancel_clipboard, { buffer = state.split.bufnr })
     vim.keymap.set("n", "e", edit, { buffer = state.split.bufnr })
     vim.keymap.set("n", "r", rename_item, { buffer = state.split.bufnr })
     vim.keymap.set("n", "D", delete_item, { buffer = state.split.bufnr })

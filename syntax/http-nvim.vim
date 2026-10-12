@@ -43,5 +43,7 @@ hi def link httpNvimFoldCount  httpNvimItemCount
 hi def link httpNvimItem       Directory
 hi def link httpNvimFold       Special
 hi def link httpNvimMethod     Keyword
+hi def httpNvimCut gui=underline cterm=underline
+hi def link httpNvimCopy httpNvimCut
 
 let b:current_syntax = "http-nvim"
