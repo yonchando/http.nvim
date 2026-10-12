@@ -57,6 +57,10 @@ p                   Paste into the folder under the cursor, or to the top
                     taken; the copy stays on the clipboard so |p| can
                     paste it again.
 <Esc>               Cancel the cut or copy started with |x| or |y|.
+]m                  Move the request or folder under the cursor down
+                    among its siblings ([count] places). It never leaves
+                    its folder.
+[m                  Same as |]m|, but up.
 u                   Undo the last deletion, putting the request or folder
                     back where it was and expanding the folders that hold
                     it. Repeat to undo older deletions.
@@ -64,6 +68,8 @@ u                   Undo the last deletion, putting the request or folder
                     file in the first 'undodir' entry, so |u| still works
                     after restarting Neovim. Otherwise they are lost on
                     exit.
+                    |r|, |a|, |p|, |]m|, |[m|, |D| and |u| rewrite the
+                    collection JSON file.
 
 ==============================================================================
 3. HIGHLIGHTS                                       *http-nvim-highlights*

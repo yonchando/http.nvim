@@ -446,6 +446,33 @@ local function paste_item()
     move_cursor_to(node)
 end
 
+--- Move the item under the cursor among its siblings: `delta` -1 is up, 1 is down,
+--- repeated [count] times and stopping at either end.
+---@param delta integer
+local function move_sibling(delta)
+    local line = vim.api.nvim_win_get_cursor(0)[1]
+    local node = state.line_nodes[line]
+    if not node then
+        return
+    end
+    local list = state.line_lists[line]
+    local from
+    for i, item in ipairs(list) do
+        if item == node then
+            from = i
+            break
+        end
+    end
+    local to = math.max(1, math.min(#list, from + delta * vim.v.count1))
+    if to == from then
+        return
+    end
+    table.insert(list, to, table.remove(list, from))
+    write_collection(collection_path)
+    render()
+    move_cursor_to(node)
+end
+
 --- Where a new item goes: inside the folder under the cursor, next to the request
 --- under the cursor, or at the top level elsewhere.
 ---@return PostmanItem[] list, PostmanItem|nil folder The folder to expand, if any
@@ -764,6 +791,8 @@ M.open = function()
     vim.keymap.set("n", "y", function() clip_item("copy") end, { buffer = state.split.bufnr })
     vim.keymap.set("n", "p", paste_item, { buffer = state.split.bufnr })
     vim.keymap.set("n", "<Esc>", cancel_clipboard, { buffer = state.split.bufnr })
+    vim.keymap.set("n", "]m", function() move_sibling(1) end, { buffer = state.split.bufnr })
+    vim.keymap.set("n", "[m", function() move_sibling(-1) end, { buffer = state.split.bufnr })
     vim.keymap.set("n", "e", edit, { buffer = state.split.bufnr })
     vim.keymap.set("n", "r", rename_item, { buffer = state.split.bufnr })
     vim.keymap.set("n", "D", delete_item, { buffer = state.split.bufnr })
