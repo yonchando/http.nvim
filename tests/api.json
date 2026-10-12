@@ -1,245 +1,4 @@
 {
-    "info": {
-        "name": "Testing Collection"
-    },
-    "item": [
-        {
-            "name": "auth",
-            "item": [
-                {
-                    "name": "login",
-                    "request": {
-                        "method": "POST",
-                        "header": [],
-                        "body": {
-                            "mode": "raw",
-                            "raw": "{\r\n    \"username\": \"admin\",\r\n    \"password\": \"password\"\r\n}",
-                            "options": {
-                                "raw": {
-                                    "language": "json"
-                                }
-                            }
-                        },
-                        "url": {
-                            "raw": "{{url}}/v1/login",
-                            "host": ["{{url}}"],
-                            "path": ["v1", "login"]
-                        }
-                    },
-                    "response": []
-                },
-                {
-                    "name": "logout",
-                    "event": [
-                        {
-                            "listen": "test",
-                            "script": {
-                                "type": "text/javascript",
-                                "exec": [""]
-                            }
-                        }
-                    ],
-                    "request": {
-                        "method": "POST",
-                        "header": [],
-                        "url": {
-                            "raw": "{{url}}/v1/logout",
-                            "host": ["{{url}}"],
-                            "path": ["v1", "logout"]
-                        }
-                    },
-                    "response": []
-                },
-                {
-                    "name": "csrf-cookie",
-                    "event": [
-                        {
-                            "listen": "test",
-                            "script": {
-                                "type": "text/javascript",
-                                "exec": [""]
-                            }
-                        }
-                    ],
-                    "request": {
-                        "method": "GET",
-                        "header": [],
-                        "url": {
-                            "raw": "{{base_url}}/sanctum/csrf-cookie",
-                            "host": ["{{base_url}}"],
-                            "path": ["sanctum", "csrf-cookie"]
-                        }
-                    },
-                    "response": []
-                }
-            ]
-        },
-        {
-            "name": "user",
-            "item": [
-                {
-                    "name": "profile",
-                    "event": [
-                        {
-                            "listen": "test",
-                            "script": {
-                                "type": "text/javascript",
-                                "exec": [""]
-                            }
-                        }
-                    ],
-                    "request": {
-                        "method": "GET",
-                        "header": [],
-                        "url": {
-                            "raw": "{{url}}/v1/user/profile",
-                            "host": ["{{url}}"],
-                            "path": ["v1", "user", "profile"]
-                        }
-                    },
-                    "response": []
-                }
-            ]
-        },
-        {
-            "name": "user-management",
-            "item": [
-                {
-                    "name": "role",
-                    "item": [
-                        {
-                            "name": "list",
-                            "request": {
-                                "method": "GET",
-                                "header": [],
-                                "url": {
-                                    "raw": "{{url}}/v1/roles",
-                                    "host": ["{{url}}"],
-                                    "path": ["v1", "roles"]
-                                }
-                            },
-                            "response": []
-                        },
-                        {
-                            "name": "create role",
-                            "protocolProfileBehavior": {
-                                "disableBodyPruning": true
-                            },
-                            "request": {
-                                "method": "GET",
-                                "header": [],
-                                "body": {
-                                    "mode": "raw",
-                                    "raw": "",
-                                    "options": {
-                                        "raw": {
-                                            "language": "json"
-                                        }
-                                    }
-                                },
-                                "url": {
-                                    "raw": "{{url}}/v1/user-management/roles/create",
-                                    "host": ["{{url}}"],
-                                    "path": [
-                                        "v1",
-                                        "user-management",
-                                        "roles",
-                                        "create"
-                                    ]
-                                }
-                            },
-                            "response": []
-                        }
-                    ]
-                },
-                {
-                    "name": "user",
-                    "item": [
-                        {
-                            "name": "list",
-                            "request": {
-                                "method": "GET",
-                                "header": [],
-                                "url": {
-                                    "raw": "{{url}}/v1/users",
-                                    "host": ["{{url}}"],
-                                    "path": ["v1", "users"]
-                                }
-                            },
-                            "response": []
-                        },
-                        {
-                            "name": "create role",
-                            "protocolProfileBehavior": {
-                                "disableBodyPruning": true
-                            },
-                            "request": {
-                                "method": "GET",
-                                "header": [],
-                                "body": {
-                                    "mode": "raw",
-                                    "raw": "",
-                                    "options": {
-                                        "raw": {
-                                            "language": "json"
-                                        }
-                                    }
-                                },
-                                "url": {
-                                    "raw": "{{url}}/v1/user-management/roles/create",
-                                    "host": ["{{url}}"],
-                                    "path": [
-                                        "v1",
-                                        "user-management",
-                                        "roles",
-                                        "create"
-                                    ]
-                                }
-                            },
-                            "response": []
-                        }
-                    ]
-                }
-            ]
-        },
-        {
-            "name": "Dashboard",
-            "item": [
-                {
-                    "name": "dashboard report",
-                    "request": {
-                        "method": "GET",
-                        "header": [],
-                        "url": {
-                            "raw": "{{url}}/v1/dashboard",
-                            "host": ["{{url}}"],
-                            "path": ["v1", "dashboard"]
-                        }
-                    },
-                    "response": []
-                }
-            ]
-        },
-        {
-            "name": "option-values",
-            "request": {
-                "method": "GET",
-                "header": [],
-                "url": {
-                    "raw": "{{url}}/v1/option-values?services=[\"permissions\", \"roles\"]",
-                    "host": ["{{url}}"],
-                    "path": ["v1", "option-values"],
-                    "query": [
-                        {
-                            "key": "services",
-                            "value": "[\"permissions\", \"roles\"]"
-                        }
-                    ]
-                }
-            },
-            "response": []
-        }
-    ],
     "event": [
         {
             "listen": "prerequest",
@@ -274,6 +33,342 @@
                 ],
                 "type": "text/javascript"
             }
+        }
+    ],
+    "info": {
+        "name": "Testing Collection"
+    },
+    "item": [
+        {
+            "item": [
+                {
+                    "name": "login",
+                    "request": {
+                        "body": {
+                            "mode": "raw",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            },
+                            "raw": "{\n    \"username\": \"admin\",\n    \"password\": \"password\",\n    \"remember_me\": true\n}"
+                        },
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "method": "POST",
+                        "url": {
+                            "host": [
+                                "{{url}}"
+                            ],
+                            "path": [
+                                "v1",
+                                "login"
+                            ],
+                            "raw": "{{url}}/v1/login"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    ""
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "name": "logout",
+                    "request": {
+                        "header": [],
+                        "method": "POST",
+                        "url": {
+                            "host": [
+                                "{{url}}"
+                            ],
+                            "path": [
+                                "v1",
+                                "logout"
+                            ],
+                            "raw": "{{url}}/v1/logout"
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    ""
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "name": "csrf-cookie",
+                    "request": {
+                        "header": [],
+                        "method": "GET",
+                        "url": {
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "sanctum",
+                                "csrf-cookie"
+                            ],
+                            "raw": "{{base_url}}/sanctum/csrf-cookie"
+                        }
+                    },
+                    "response": []
+                }
+            ],
+            "name": "auth"
+        },
+        {
+            "item": [
+                {
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    ""
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "name": "profile",
+                    "request": {
+                        "header": [],
+                        "method": "GET",
+                        "url": {
+                            "host": [
+                                "{{url}}"
+                            ],
+                            "path": [
+                                "v1",
+                                "user",
+                                "profile"
+                            ],
+                            "raw": "{{url}}/v1/user/profile"
+                        }
+                    },
+                    "response": []
+                }
+            ],
+            "name": "user"
+        },
+        {
+            "item": [
+                {
+                    "item": [
+                        {
+                            "name": "list role",
+                            "request": {
+                                "header": [],
+                                "method": "GET",
+                                "url": {
+                                    "host": [
+                                        "{{url}}"
+                                    ],
+                                    "path": [
+                                        "v1",
+                                        "roles"
+                                    ],
+                                    "raw": "{{url}}/v1/roles"
+                                }
+                            },
+                            "response": []
+                        },
+                        {
+                            "name": "create role",
+                            "protocolProfileBehavior": {
+                                "disableBodyPruning": true
+                            },
+                            "request": {
+                                "body": {
+                                    "mode": "raw",
+                                    "options": {
+                                        "raw": {
+                                            "language": "json"
+                                        }
+                                    },
+                                    "raw": ""
+                                },
+                                "header": [],
+                                "method": "GET",
+                                "url": {
+                                    "host": [
+                                        "{{url}}"
+                                    ],
+                                    "path": [
+                                        "v1",
+                                        "user-management",
+                                        "roles",
+                                        "create"
+                                    ],
+                                    "raw": "{{url}}/v1/user-management/roles/create"
+                                }
+                            },
+                            "response": []
+                        }
+                    ],
+                    "name": "role"
+                },
+                {
+                    "item": [
+                        {
+                            "name": "list user",
+                            "request": {
+                                "header": [],
+                                "method": "GET",
+                                "url": {
+                                    "host": [
+                                        "{{url}}"
+                                    ],
+                                    "path": [
+                                        "v1",
+                                        "users"
+                                    ],
+                                    "raw": "{{url}}/v1/users"
+                                }
+                            },
+                            "response": []
+                        },
+                        {
+                            "name": "create user",
+                            "protocolProfileBehavior": {
+                                "disableBodyPruning": true
+                            },
+                            "request": {
+                                "header": [],
+                                "method": "GET",
+                                "url": {
+                                    "raw": "{{url}}/v1/user-management/users/create"
+                                }
+                            },
+                            "response": []
+                        }
+                    ],
+                    "name": "user"
+                }
+            ],
+            "name": "users-management"
+        },
+        {
+            "item": [
+                {
+                    "name": "dashboard-report",
+                    "request": {
+                        "header": [],
+                        "method": "GET",
+                        "url": {
+                            "host": [
+                                "{{url}}"
+                            ],
+                            "path": [
+                                "v1",
+                                "dashboard"
+                            ],
+                            "raw": "{{url}}/v1/dashboard"
+                        }
+                    },
+                    "response": []
+                }
+            ],
+            "name": "dashboard"
+        },
+        {
+            "item": [
+                {
+                    "item": [
+                        {
+                            "name": "list request",
+                            "request": {
+                                "header": [],
+                                "method": "GET",
+                                "url": {
+                                    "raw": "{{url}}/v1/requests"
+                                }
+                            }
+                        }
+                    ],
+                    "name": "request-leave"
+                },
+                {
+                    "item": [],
+                    "name": "request-balance"
+                }
+            ],
+            "name": "requests"
+        },
+        {
+            "item": [
+                {
+                    "item": [
+                        {
+                            "name": "balance",
+                            "request": {
+                                "method": "GET",
+                                "url": {
+                                    "raw": ""
+                                }
+                            }
+                        }
+                    ],
+                    "name": "leave-balance"
+                }
+            ],
+            "name": "leave-management"
+        },
+        {
+            "item": [
+                {
+                    "name": "option-values",
+                    "request": {
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "method": "GET",
+                        "url": {
+                            "host": [
+                                "{{url}}"
+                            ],
+                            "path": [
+                                "v1",
+                                "option-values"
+                            ],
+                            "query": [
+                                {
+                                    "key": "services",
+                                    "value": "[\"permissions\", \"roles\"]"
+                                }
+                            ],
+                            "raw": "{{url}}/v1/option-values?services=[\"permissions\", \"roles\"]"
+                        }
+                    },
+                    "response": []
+                }
+            ],
+            "name": "options"
         }
     ]
 }
