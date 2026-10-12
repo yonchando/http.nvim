@@ -1,0 +1,46 @@
+*http-nvim.txt*    Http nvim plugin help manage RESTApi
+
+==============================================================================
+CONTENTS                                              *http-nvim-contents*
+
+  1. Introduction .................... |http-nvim-intro|
+  2. Keymaps ......................... |http-nvim-keymaps|
+  3. Highlights ...................... |http-nvim-highlights|
+
+==============================================================================
+1. INTRODUCTION                                          *http-nvim-intro*
+
+http-nvim helps you do something useful.
+
+==============================================================================
+2. KEYMAPS                                             *http-nvim-keymaps*
+
+<leader>rr                  open your collection resapi.
+g?                  Open this help page.
+<CR> or =           Expand or collapse the collection or folder under the
+                    cursor.
+e                   Edit the request under the cursor in JetBrains HTTP
+                    Client format. |:w| saves it back to the collection
+                    (in memory only; the JSON file is not rewritten).
+
+==============================================================================
+3. HIGHLIGHTS                                       *http-nvim-highlights*
+
+The panel buffer (filetype `http-nvim`) defines these groups, styled after
+vim-fugitive. Override any of them with |:highlight|.
+
+  httpNvimHeader       Header label, e.g. `Env:`        links to |hl-Label|
+  httpNvimHelpHeader   The `Help:` label               links to httpNvimHeader
+  httpNvimHelpTag      Key after `Help:`, e.g. `g?`      links to Tag
+  httpNvimHeading      Section heading                 links to PreProc
+  httpNvimCount        Section count, the `N` in `(N)`   links to Number
+  httpNvimEntry        Entry key in `KEY = value`       links to Identifier
+  httpNvimEquals       The `=` in an entry              links to Operator
+  httpNvimValue        Entry value                     links to String
+  httpNvimItemCount    Item count, the `N` in `(N) name` links to httpNvimCount
+  httpNvimItem         Item name, e.g. a collection    links to |hl-Directory|
+  httpNvimFold         Expand/collapse marker `▸`/`▾`    links to Special
+  httpNvimMethod       Request method, e.g. `GET`       links to Keyword
+  httpNvimRequest      Request name                    not linked
+
+ vim:tw=78:ts=8:ft=help:norl:

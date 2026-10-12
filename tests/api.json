@@ -1,0 +1,279 @@
+{
+    "info": {
+        "name": "Testing Collection"
+    },
+    "item": [
+        {
+            "name": "auth",
+            "item": [
+                {
+                    "name": "login",
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\r\n    \"username\": \"admin\",\r\n    \"password\": \"password\"\r\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{url}}/v1/login",
+                            "host": ["{{url}}"],
+                            "path": ["v1", "login"]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "logout",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [""]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "url": {
+                            "raw": "{{url}}/v1/logout",
+                            "host": ["{{url}}"],
+                            "path": ["v1", "logout"]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "csrf-cookie",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [""]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/sanctum/csrf-cookie",
+                            "host": ["{{base_url}}"],
+                            "path": ["sanctum", "csrf-cookie"]
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "user",
+            "item": [
+                {
+                    "name": "profile",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [""]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{url}}/v1/user/profile",
+                            "host": ["{{url}}"],
+                            "path": ["v1", "user", "profile"]
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "user-management",
+            "item": [
+                {
+                    "name": "role",
+                    "item": [
+                        {
+                            "name": "list",
+                            "request": {
+                                "method": "GET",
+                                "header": [],
+                                "url": {
+                                    "raw": "{{url}}/v1/roles",
+                                    "host": ["{{url}}"],
+                                    "path": ["v1", "roles"]
+                                }
+                            },
+                            "response": []
+                        },
+                        {
+                            "name": "create role",
+                            "protocolProfileBehavior": {
+                                "disableBodyPruning": true
+                            },
+                            "request": {
+                                "method": "GET",
+                                "header": [],
+                                "body": {
+                                    "mode": "raw",
+                                    "raw": "",
+                                    "options": {
+                                        "raw": {
+                                            "language": "json"
+                                        }
+                                    }
+                                },
+                                "url": {
+                                    "raw": "{{url}}/v1/user-management/roles/create",
+                                    "host": ["{{url}}"],
+                                    "path": [
+                                        "v1",
+                                        "user-management",
+                                        "roles",
+                                        "create"
+                                    ]
+                                }
+                            },
+                            "response": []
+                        }
+                    ]
+                },
+                {
+                    "name": "user",
+                    "item": [
+                        {
+                            "name": "list",
+                            "request": {
+                                "method": "GET",
+                                "header": [],
+                                "url": {
+                                    "raw": "{{url}}/v1/users",
+                                    "host": ["{{url}}"],
+                                    "path": ["v1", "users"]
+                                }
+                            },
+                            "response": []
+                        },
+                        {
+                            "name": "create role",
+                            "protocolProfileBehavior": {
+                                "disableBodyPruning": true
+                            },
+                            "request": {
+                                "method": "GET",
+                                "header": [],
+                                "body": {
+                                    "mode": "raw",
+                                    "raw": "",
+                                    "options": {
+                                        "raw": {
+                                            "language": "json"
+                                        }
+                                    }
+                                },
+                                "url": {
+                                    "raw": "{{url}}/v1/user-management/roles/create",
+                                    "host": ["{{url}}"],
+                                    "path": [
+                                        "v1",
+                                        "user-management",
+                                        "roles",
+                                        "create"
+                                    ]
+                                }
+                            },
+                            "response": []
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Dashboard",
+            "item": [
+                {
+                    "name": "dashboard report",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{url}}/v1/dashboard",
+                            "host": ["{{url}}"],
+                            "path": ["v1", "dashboard"]
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "option-values",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{url}}/v1/option-values?services=[\"permissions\", \"roles\"]",
+                    "host": ["{{url}}"],
+                    "path": ["v1", "option-values"],
+                    "query": [
+                        {
+                            "key": "services",
+                            "value": "[\"permissions\", \"roles\"]"
+                        }
+                    ]
+                }
+            },
+            "response": []
+        }
+    ],
+    "event": [
+        {
+            "listen": "prerequest",
+            "script": {
+                "exec": [
+                    "const xsrfToken = pm.environment.get('xsrf_token');\r",
+                    "\r",
+                    "pm.request.headers.upsert({\r",
+                    "    key: \"Accept\",\r",
+                    "    value: \"application/json\"\r",
+                    "})\r",
+                    "\r",
+                    "if (xsrfToken) {\r",
+                    "    pm.request.headers.upsert({\r",
+                    "        key: 'X-XSRF-TOKEN',\r",
+                    "        value: xsrfToken\r",
+                    "    });\r",
+                    "}"
+                ],
+                "type": "text/javascript"
+            }
+        },
+        {
+            "listen": "test",
+            "script": {
+                "exec": [
+                    "var xsrfToken = pm.cookies.get(\"XSRF-TOKEN\");\r",
+                    "\r",
+                    "if (xsrfToken) {\r",
+                    "    pm.environment.set(\"xsrf_token\", decodeURIComponent(xsrfToken));\r",
+                    "}"
+                ],
+                "type": "text/javascript"
+            }
+        }
+    ]
+}

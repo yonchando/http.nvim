@@ -1,0 +1,8 @@
+:http-nvimRun	http-nvim.txt	/*:http-nvimRun*
+http-nvim-commands	http-nvim.txt	/*http-nvim-commands*
+http-nvim-contents	http-nvim.txt	/*http-nvim-contents*
+http-nvim-highlights	http-nvim.txt	/*http-nvim-highlights*
+http-nvim-intro	http-nvim.txt	/*http-nvim-intro*
+http-nvim-keymaps	http-nvim.txt	/*http-nvim-keymaps*
+http-nvim-setup	http-nvim.txt	/*http-nvim-setup*
+http-nvim.txt	http-nvim.txt	/*http-nvim.txt*
