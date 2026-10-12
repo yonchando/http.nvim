@@ -39,6 +39,17 @@ a                   Add a request or folder: inside the folder under the
                     `api/v1`.
                     `api/v1/` (ending with `/`) adds only the folders.
                     Folders that already exist along the path are reused.
+D                   Delete the request or folder (with everything in it)
+                    under the cursor, after confirming.
+                    Edit buffers of the deleted requests are closed;
+                    the prompt warns if any has unsaved changes.
+u                   Undo the last deletion, putting the request or folder
+                    back where it was and expanding the folders that hold
+                    it. Repeat to undo older deletions.
+                    When 'undofile' is set, the deletions are kept in a
+                    file in the first 'undodir' entry, so |u| still works
+                    after restarting Neovim. Otherwise they are lost on
+                    exit.
 
 ==============================================================================
 3. HIGHLIGHTS                                       *http-nvim-highlights*

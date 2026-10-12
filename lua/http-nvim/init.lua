@@ -20,6 +20,12 @@ local jetbrains = require("http-nvim.jetbrains")
 
 ---@alias Node PostmanCollection|PostmanItem
 
+---@class DeletedItem
+---@field list PostmanItem[]|nil The list it was removed from; nil when loaded from the undo file
+---@field parent string[] Names of the folders that held it, from the top level
+---@field index integer
+---@field node PostmanItem
+
 ---@class State
 ---@field split NuiSplit|nil
 ---@field collection PostmanCollection|nil The loaded collection, written back to `collection_path` on save
@@ -28,6 +34,7 @@ local jetbrains = require("http-nvim.jetbrains")
 ---@field line_nodes table<integer, Node>
 ---@field line_paths table<integer, string> Slash-separated item names, e.g. `auth/login`
 ---@field line_lists table<integer, PostmanItem[]> The list that holds the item on each line
+---@field deleted DeletedItem[] Deleted folders and requests, most recent last, for `u`
 ---@field edit_bufs table<PostmanItem, integer> Edit buffer of each request opened with `e`
 local state = {
     split = nil,
@@ -38,6 +45,7 @@ local state = {
     line_paths = {},
     line_lists = {},
     edit_bufs = {},
+    deleted = {},
 }
 
 local M = {}
@@ -73,6 +81,82 @@ local function write_collection(path)
         vim.notify("http-nvim: failed to write collection " .. path .. ": " .. tostring(err), vim.log.levels.ERROR)
     end
     return ok
+end
+
+--- File in the first 'undodir' entry that keeps folder deletions across sessions,
+--- or nil when 'undofile' is off. Named like Vim's own undo files (full path with
+--- `%` for `/`) plus a suffix, so it never clashes with the collection file's undo file.
+---@return string|nil
+local function undo_path()
+    if not vim.go.undofile then
+        return nil
+    end
+    local dir = vim.split(vim.go.undodir, ",", { plain = true })[1] or ""
+    if dir == "" or dir == "." or dir:sub(1, 2) == "./" then
+        -- "." means next to the file, as for Vim's own undo files
+        dir = vim.fn.fnamemodify(collection_path, ":h") .. dir:sub(2)
+    end
+    dir = vim.fn.expand(dir):gsub("/+$", "")
+    local name = vim.fn.fnamemodify(collection_path, ":p"):gsub("/", "%%")
+    return dir .. "/" .. name .. ".http-nvim.json"
+end
+
+local function load_deleted()
+    local path = undo_path()
+    if not path or vim.fn.filereadable(path) == 0 then
+        return {}
+    end
+    local ok, deleted = pcall(function()
+        return vim.json.decode(table.concat(vim.fn.readfile(path), "\n"), { luanil = { object = true, array = true } })
+    end)
+    if not ok or type(deleted) ~= "table" then
+        vim.notify("http-nvim: ignoring unreadable undo file " .. path, vim.log.levels.WARN)
+        return {}
+    end
+    return deleted
+end
+
+local function write_deleted()
+    local path = undo_path()
+    if not path then
+        return
+    end
+    local ok, err = pcall(function()
+        local entries = vim.tbl_map(function(deleted)
+            return { parent = deleted.parent, index = deleted.index, node = deleted.node }
+        end, state.deleted)
+        vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
+        if vim.fn.writefile({ vim.json.encode(entries) }, path) ~= 0 then
+            error("cannot write file")
+        end
+    end)
+    if not ok then
+        vim.notify("http-nvim: failed to write undo file " .. path .. ": " .. tostring(err), vim.log.levels.ERROR)
+    end
+end
+
+--- Find the item list a deleted item goes back into by its parent folder names.
+---@param parent string[]
+---@return PostmanItem[]|nil list, PostmanItem[] folders The folders along the way, outermost first
+local function resolve_parent(parent)
+    local list = state.items
+    local folders = {}
+    for _, name in ipairs(parent) do
+        local folder
+        for _, item in ipairs(list) do
+            if item.name == name and not item.request then
+                folder = item
+                break
+            end
+        end
+        if not folder then
+            return nil, folders
+        end
+        folder.item = folder.item or {}
+        table.insert(folders, folder)
+        list = folder.item
+    end
+    return list, folders
 end
 
 ---@param node Node
@@ -287,6 +371,89 @@ local function ensure_folders(list, folder, names)
     return list, folder, created
 end
 
+--- Edit buffers still open for `node` or any request inside it.
+---@param node PostmanItem
+---@return integer[]
+local function edit_bufs_under(node)
+    local bufs = {}
+    local function collect(item)
+        local bufnr = state.edit_bufs[item]
+        if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+            table.insert(bufs, bufnr)
+        end
+        for _, child in ipairs(item.item or {}) do
+            collect(child)
+        end
+    end
+    collect(node)
+    return bufs
+end
+
+local function delete_item()
+    local line = vim.api.nvim_win_get_cursor(0)[1]
+    local node = state.line_nodes[line]
+    if not node then
+        return
+    end
+    local message = node.request and "Delete request '" .. node.name .. "'?"
+        or "Delete folder '" .. node.name .. "' and its " .. count_requests(node) .. " request(s)?"
+    local bufs = edit_bufs_under(node)
+    for _, bufnr in ipairs(bufs) do
+        if vim.bo[bufnr].modified then
+            message = message .. "\nUnsaved changes in its edit buffer will be lost."
+            break
+        end
+    end
+    if vim.fn.confirm(message, "&Yes\n&No", 2) ~= 1 then
+        return
+    end
+    -- Writing them would no longer reach the collection, so close them
+    for _, bufnr in ipairs(bufs) do
+        vim.api.nvim_buf_delete(bufnr, { force = true })
+    end
+    local siblings = state.line_lists[line]
+    for i, sibling in ipairs(siblings) do
+        if sibling == node then
+            table.remove(siblings, i)
+            local parent = vim.split(state.line_paths[line], "/", { plain = true })
+            table.remove(parent)
+            table.insert(state.deleted, { list = siblings, parent = parent, index = i, node = node })
+            break
+        end
+    end
+    state.expanded[node] = nil
+    write_collection(collection_path)
+    write_deleted()
+    render()
+    vim.api.nvim_win_set_cursor(state.split.winid, { math.min(line, vim.api.nvim_buf_line_count(state.split.bufnr)), 0 })
+end
+
+local function undo_delete()
+    local deleted = table.remove(state.deleted)
+    if not deleted then
+        vim.notify("http-nvim: nothing to undo")
+        return
+    end
+    local list, folders = resolve_parent(deleted.parent)
+    list = deleted.list or list
+    if not list then
+        -- The parent folder was renamed or deleted since: fall back to the top level
+        list = state.items
+        vim.notify("http-nvim: folder '" .. table.concat(deleted.parent, "/") .. "' not found, restored '"
+            .. deleted.node.name .. "' at the top level", vim.log.levels.WARN)
+    end
+    -- Later edits may have shortened the list; clamp to keep it a sequence
+    table.insert(list, math.min(deleted.index, #list + 1), deleted.node)
+    -- Expand the folders that hold it so the cursor can land on it
+    for _, folder in ipairs(folders) do
+        state.expanded[folder] = true
+    end
+    write_collection(collection_path)
+    write_deleted()
+    render()
+    move_cursor_to(deleted.node)
+end
+
 local function toggle()
     local node = state.line_nodes[vim.api.nvim_win_get_cursor(0)[1]]
     if not node or not node.item or #node.item == 0 then
@@ -420,6 +587,7 @@ M.open = function()
     if not state.collection then
         state.collection = load_collection(collection_path)
         state.items = state.collection.item
+        state.deleted = load_deleted()
     end
 
     state.split = Split({
@@ -446,6 +614,8 @@ M.open = function()
     vim.keymap.set("n", "a", create_item, { buffer = state.split.bufnr })
     vim.keymap.set("n", "e", edit, { buffer = state.split.bufnr })
     vim.keymap.set("n", "r", rename_item, { buffer = state.split.bufnr })
+    vim.keymap.set("n", "D", delete_item, { buffer = state.split.bufnr })
+    vim.keymap.set("n", "u", undo_delete, { buffer = state.split.bufnr })
 end
 
 M.setup = function(opts)
