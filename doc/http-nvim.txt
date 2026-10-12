@@ -20,8 +20,13 @@ g?                  Open this help page.
 <CR> or =           Expand or collapse the collection or folder under the
                     cursor.
 e                   Edit the request under the cursor in JetBrains HTTP
-                    Client format. |:w| saves it back to the collection
-                    (in memory only; the JSON file is not rewritten).
+                    Client format, in a new split above the panel.
+                    Closing that window returns to the panel.
+                    |:w| saves the request and rewrites the collection
+                    JSON file (keys sorted, 4-space indent). Only the
+                    first `### name` section is kept; other sections are
+                    removed from the buffer. Changing the `### name` line
+                    renames the request.
 
 ==============================================================================
 3. HIGHLIGHTS                                       *http-nvim-highlights*

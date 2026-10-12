@@ -9,6 +9,15 @@
 
 local M = {}
 
+-- Captures come back in document order, so headers and disabled-header comments stay interleaved
+local fields_source = [[
+(request method: (method) @method)
+(request url: (target_url) @url)
+(request header: (header) @header)
+(request (comment) @comment)
+(request body: (_) @body)
+]]
+
 ---@param request PostmanRequest|string
 ---@return string
 local function url_of(request)
@@ -54,44 +63,76 @@ end
 
 --- Parse lines written by `to_lines` back into a Postman request, keeping the
 --- fields the HTTP format cannot express from `original`.
+--- Only the first `### name` section is read; other sections are ignored.
 ---@param lines string[]
 ---@param original PostmanRequest|string
----@return PostmanRequest|nil, string|nil
+---@return PostmanRequest|nil, string|nil, { name: string, start_row: integer, end_row: integer }|nil Name and 0-based, end-exclusive line range of the section used
 M.from_lines = function(lines, original)
-    local i = 1
-    -- Skip the `### name` separator, comments and blank lines before the request line
-    while lines[i] and (lines[i]:match("^%s*$") or lines[i]:match("^%s*#") or lines[i]:match("^%s*//")) do
-        i = i + 1
+    local text = table.concat(lines, "\n") .. "\n"
+    -- `query.parse` is memoized, so this only parses the queries once
+    local ok, parser = pcall(vim.treesitter.get_string_parser, text, "http")
+    if not ok then
+        return nil, "tree-sitter http parser not found (:TSInstall http)"
     end
-    if not lines[i] then
-        return nil, "missing request line"
+    local section_query = vim.treesitter.query.parse("http", [[
+(section (request_separator value: (value) @name) request: (request) @request) @section
+]])
+    local fields_query = vim.treesitter.query.parse("http", fields_source)
+    local root = parser:parse()[1]:root()
+
+    -- Only the first named section is used
+    local request_node, range
+    for _, match in section_query:iter_matches(root, text) do
+        local section_name, section
+        for id, nodes in pairs(match) do
+            local capture = section_query.captures[id]
+            if capture == "name" then
+                section_name = vim.trim(vim.treesitter.get_node_text(nodes[1], text))
+            elseif capture == "request" then
+                request_node = nodes[1]
+            elseif capture == "section" then
+                section = nodes[1]
+            end
+        end
+        local start_row, _, end_row, end_col = section:range()
+        range = { name = section_name, start_row = start_row, end_row = end_col > 0 and end_row + 1 or end_row }
+        break
+    end
+    if not request_node or not range or range.name == "" then
+        return nil, "missing '### name' section with a request"
     end
 
-    local method, url = lines[i]:match("^%s*(%u+)%s+(.-)%s*$")
-    if not method then
-        method, url = "GET", vim.trim(lines[i])
+    local method, url = "GET", nil
+    local headers = {}
+    local body_lines = {}
+    for id, node in fields_query:iter_captures(request_node, text) do
+        local capture = fields_query.captures[id]
+        local node_text = vim.treesitter.get_node_text(node, text)
+        if capture == "method" then
+            method = node_text
+        elseif capture == "url" then
+            url = vim.trim(node_text)
+        elseif capture == "header" then
+            local key = node:field("name")[1]
+            local value = node:field("value")[1]
+            table.insert(headers, {
+                key = vim.trim(vim.treesitter.get_node_text(key, text)),
+                value = value and vim.trim(vim.treesitter.get_node_text(value, text)) or "",
+            })
+        elseif capture == "comment" then
+            -- `# Key: value` comments are disabled headers
+            local key, value = node_text:match("^#%s*([^:%s][^:]*):%s*(.-)%s*$")
+            if key then
+                table.insert(headers, { key = vim.trim(key), value = value, disabled = true })
+            end
+        elseif capture == "body" then
+            body_lines = vim.split(node_text, "\n", { plain = true })
+        end
     end
-    url = url:gsub("%s+HTTP/[%d.]+$", "")
-    if url == "" then
+    if not url or url == "" then
         return nil, "missing url"
     end
-    i = i + 1
 
-    local headers = {}
-    while lines[i] and not lines[i]:match("^%s*$") do
-        local disabled, key, value = lines[i]:match("^(#?)%s*([^:%s][^:]*):%s*(.*)$")
-        if not key then
-            return nil, "invalid header line " .. i .. ": " .. lines[i]
-        end
-        local header = { key = vim.trim(key), value = value }
-        if disabled == "#" then
-            header.disabled = true
-        end
-        table.insert(headers, header)
-        i = i + 1
-    end
-
-    local body_lines = vim.list_slice(lines, i + 1)
     while #body_lines > 0 and body_lines[#body_lines]:match("^%s*$") do
         table.remove(body_lines)
     end
@@ -106,14 +147,15 @@ M.from_lines = function(lines, original)
     local body = request.body
     if body and body.mode and body.mode ~= "raw" then
         -- Not representable in the HTTP format: leave the original body untouched
-        return request, nil
+        return request, nil, range
     end
     if #body_lines > 0 then
         request.body = vim.tbl_extend("force", body or {}, { mode = "raw", raw = table.concat(body_lines, "\n") })
     else
         request.body = nil
     end
-    return request, nil
+
+    return request, nil, range
 end
 
 return M
