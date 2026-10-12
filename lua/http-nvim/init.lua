@@ -27,6 +27,7 @@ local jetbrains = require("http-nvim.jetbrains")
 ---@field expanded table<Node, boolean>
 ---@field line_nodes table<integer, Node>
 ---@field line_paths table<integer, string> Slash-separated item names, e.g. `auth/login`
+---@field line_lists table<integer, PostmanItem[]> The list that holds the item on each line
 ---@field edit_bufs table<PostmanItem, integer> Edit buffer of each request opened with `e`
 local state = {
     split = nil,
@@ -35,6 +36,7 @@ local state = {
     expanded = {},
     line_nodes = {},
     line_paths = {},
+    line_lists = {},
     edit_bufs = {},
 }
 
@@ -108,6 +110,7 @@ local function render_items(nodes, depth, lines, parent_path)
         end
         state.line_nodes[#lines] = node
         state.line_paths[#lines] = path:sub(2)
+        state.line_lists[#lines] = nodes
         if state.expanded[node] then
             render_items(node.item, depth + 1, lines, path)
         end
@@ -124,12 +127,96 @@ local function render()
     }
     state.line_nodes = {}
     state.line_paths = {}
+    state.line_lists = {}
     render_items(state.items, 0, lines, "")
 
     local bufnr = state.split.bufnr
     vim.bo[bufnr].modifiable = true
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
     vim.bo[bufnr].modifiable = false
+end
+
+---@param node Node
+local function move_cursor_to(node)
+    for line, line_node in pairs(state.line_nodes) do
+        if line_node == node then
+            vim.api.nvim_win_set_cursor(state.split.winid, { line, 0 })
+            return
+        end
+    end
+end
+
+--- Where a new item goes: inside the folder under the cursor, next to the request
+--- under the cursor, or at the top level elsewhere.
+---@return PostmanItem[] list, PostmanItem|nil folder The folder to expand, if any
+local function new_item_target()
+    local line = vim.api.nvim_win_get_cursor(0)[1]
+    local node = state.line_nodes[line]
+    if node and not node.request then
+        node.item = node.item or {}
+        return node.item, node
+    elseif node then
+        return state.line_lists[line], nil
+    end
+    return state.items, nil
+end
+
+---@param item PostmanItem
+---@param list PostmanItem[]
+---@param folder PostmanItem|nil
+local function add_item(item, list, folder)
+    table.insert(list, item)
+    if folder then
+        state.expanded[folder] = true
+    end
+    write_collection(collection_path)
+    render()
+    vim.api.nvim_set_current_win(state.split.winid)
+    move_cursor_to(item)
+end
+
+--- Split `a/b/c` into trimmed, non-empty names.
+---@param input string|nil
+---@return string[]
+local function split_path(input)
+    local names = {}
+    for _, name in ipairs(vim.split(input or "", "/", { plain = true })) do
+        name = vim.trim(name)
+        if name ~= "" then
+            table.insert(names, name)
+        end
+    end
+    return names
+end
+
+--- Walk `names` from `list` like `mkdir -p`: folders that already exist along the
+--- path are reused, missing ones are created. Every folder on the way is expanded.
+---@param list PostmanItem[]
+---@param folder PostmanItem|nil The folder holding `list`, if any
+---@param names string[]
+---@return PostmanItem[] list, PostmanItem|nil folder, boolean created
+local function ensure_folders(list, folder, names)
+    local created = false
+    for _, name in ipairs(names) do
+        if folder then
+            state.expanded[folder] = true
+        end
+        local existing
+        for _, item in ipairs(list) do
+            if item.name == name and not item.request then
+                existing = item
+                break
+            end
+        end
+        if not existing then
+            existing = { name = name, item = {} }
+            table.insert(list, existing)
+            created = true
+        end
+        existing.item = existing.item or {}
+        folder, list = existing, existing.item
+    end
+    return list, folder, created
 end
 
 local function toggle()
@@ -141,7 +228,46 @@ local function toggle()
     render()
 end
 
-local function edit()
+local edit
+
+--- Add a GET request with an empty URL and open it with `e` to fill it in.
+--- `a/b/name` creates the request inside folders `a/b`; a trailing `/` (`a/b/`)
+--- creates only the folders.
+local function create_item()
+    local list, folder = new_item_target()
+    vim.ui.input({ prompt = "Add new request or folder: " }, function(input)
+        local names = split_path(input)
+        if vim.trim(input or ""):sub(-1) == "/" then
+            if #names == 0 then
+                return
+            end
+            local _, last, created = ensure_folders(list, folder, names)
+            if created then
+                write_collection(collection_path)
+            end
+            render()
+            vim.api.nvim_set_current_win(state.split.winid)
+            move_cursor_to(last)
+            return
+        end
+        local name = table.remove(names)
+        if not name then
+            return
+        end
+        -- A clash is only possible when every folder already existed, so nothing is left behind
+        local target, parent = ensure_folders(list, folder, names)
+        for _, sibling in ipairs(target) do
+            if sibling.name == name then
+                vim.notify("http-nvim: '" .. name .. "' already exists here", vim.log.levels.ERROR)
+                return
+            end
+        end
+        add_item({ name = name, request = { method = "GET", url = { raw = "" } } }, target, parent)
+        edit()
+    end)
+end
+
+edit = function()
     local line = vim.api.nvim_win_get_cursor(0)[1]
     local node = state.line_nodes[line]
     if not node or not node.request then
@@ -248,6 +374,7 @@ M.open = function()
     end)
     vim.keymap.set("n", "<CR>", toggle, { buffer = state.split.bufnr })
     vim.keymap.set("n", "=", toggle, { buffer = state.split.bufnr })
+    vim.keymap.set("n", "a", create_item, { buffer = state.split.bufnr })
     vim.keymap.set("n", "e", edit, { buffer = state.split.bufnr })
 end
 

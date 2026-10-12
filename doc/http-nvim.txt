@@ -27,6 +27,16 @@ e                   Edit the request under the cursor in JetBrains HTTP
                     first `### name` section is kept; other sections are
                     removed from the buffer. Changing the `### name` line
                     renames the request.
+a                   Add a request or folder: inside the folder under the
+                    cursor, next to the request under the cursor, or at
+                    the top level on any other line.
+                    `get-users` adds a request and opens it for editing.
+                    It starts as `GET` with an empty URL; fill in the URL
+                    before |:w|.
+                    `api/v1/get-users` adds the request inside folders
+                    `api/v1`.
+                    `api/v1/` (ending with `/`) adds only the folders.
+                    Folders that already exist along the path are reused.
 
 ==============================================================================
 3. HIGHLIGHTS                                       *http-nvim-highlights*
