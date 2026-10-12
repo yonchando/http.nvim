@@ -211,7 +211,7 @@ local function render()
         "",
         "Environment variables (0)",
         "",
-        "Collection (" .. #state.items .. ")",
+        "Collection (" .. count_requests({ item = state.items }) .. ")",
     }
     state.line_nodes = {}
     state.line_paths = {}
