@@ -146,6 +146,74 @@ local function move_cursor_to(node)
     end
 end
 
+--- Ask for an item name that is unique within `siblings`.
+---@param kind "folder"|"request"
+---@param prompt string
+---@param default string|nil
+---@param siblings PostmanItem[]
+---@param on_name fun(name: string)
+local function input_item_name(kind, prompt, default, siblings, on_name)
+    vim.ui.input({ prompt = prompt, default = default }, function(input)
+        local name = input and vim.trim(input) or ""
+        if name == "" or name == default then
+            return
+        end
+        -- Item paths (and edit buffer names) are slash-separated names
+        if name:find("/", 1, true) then
+            vim.notify("http-nvim: " .. kind .. " name cannot contain '/'", vim.log.levels.ERROR)
+            return
+        end
+        for _, sibling in ipairs(siblings) do
+            if sibling.name == name then
+                vim.notify("http-nvim: '" .. name .. "' already exists here", vim.log.levels.ERROR)
+                return
+            end
+        end
+        on_name(name)
+    end)
+end
+
+--- Keep open edit buffers in step with a renamed item: buffer names carry the item
+--- path, and a request's own buffer carries its name on the `### name` line.
+---@param item PostmanItem
+---@param path string The item's new slash-separated path
+---@param renamed boolean Whether `item` itself is the renamed item
+local function rename_edit_bufs(item, path, renamed)
+    local bufnr = state.edit_bufs[item]
+    if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+        pcall(vim.api.nvim_buf_set_name, bufnr, "http-nvim://" .. path .. " (edit)")
+        if renamed and vim.api.nvim_buf_is_loaded(bufnr) then
+            local modified = vim.bo[bufnr].modified
+            for i, line in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+                if line:match("^###") then
+                    vim.api.nvim_buf_set_lines(bufnr, i - 1, i, false, { "### " .. item.name })
+                    break
+                end
+            end
+            vim.bo[bufnr].modified = modified
+        end
+    end
+    for _, child in ipairs(item.item or {}) do
+        rename_edit_bufs(child, path .. "/" .. child.name, false)
+    end
+end
+
+local function rename_item()
+    local line = vim.api.nvim_win_get_cursor(0)[1]
+    local node = state.line_nodes[line]
+    if not node then
+        return
+    end
+    local kind = node.request and "request" or "folder"
+    input_item_name(kind, "Rename " .. kind .. ": ", node.name, state.line_lists[line], function(name)
+        node.name = name
+        rename_edit_bufs(node, (state.line_paths[line]:match("^(.*/)") or "") .. name, true)
+        write_collection(collection_path)
+        render()
+        move_cursor_to(node)
+    end)
+end
+
 --- Where a new item goes: inside the folder under the cursor, next to the request
 --- under the cursor, or at the top level elsewhere.
 ---@return PostmanItem[] list, PostmanItem|nil folder The folder to expand, if any
@@ -331,6 +399,7 @@ edit = function()
             end
             if section.name ~= node.name then
                 node.name = section.name
+                -- Read the path from the buffer name: `r` may have renamed a parent folder since
                 local path = vim.api.nvim_buf_get_name(bufnr):match("^http%-nvim://(.*) %(edit%)$") or ""
                 path = (path:match("^(.*/)") or "") .. section.name
                 pcall(vim.api.nvim_buf_set_name, bufnr, "http-nvim://" .. path .. " (edit)")
@@ -376,6 +445,7 @@ M.open = function()
     vim.keymap.set("n", "=", toggle, { buffer = state.split.bufnr })
     vim.keymap.set("n", "a", create_item, { buffer = state.split.bufnr })
     vim.keymap.set("n", "e", edit, { buffer = state.split.bufnr })
+    vim.keymap.set("n", "r", rename_item, { buffer = state.split.bufnr })
 end
 
 M.setup = function(opts)

@@ -27,6 +27,8 @@ e                   Edit the request under the cursor in JetBrains HTTP
                     first `### name` section is kept; other sections are
                     removed from the buffer. Changing the `### name` line
                     renames the request.
+r                   Rename the request or folder under the cursor. Open
+                    edit buffers follow the new name.
 a                   Add a request or folder: inside the folder under the
                     cursor, next to the request under the cursor, or at
                     the top level on any other line.
