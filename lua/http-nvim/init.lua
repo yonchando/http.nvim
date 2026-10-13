@@ -18,8 +18,6 @@ local jetbrains = require("http-nvim.jetbrains")
 ---@field info { name: string, schema: string|nil }
 ---@field item PostmanItem[]
 
----@alias Node PostmanCollection|PostmanItem
-
 ---@class DeletedItem
 ---@field list PostmanItem[]|nil The list it was removed from; nil when loaded from the undo file
 ---@field parent string[] Names of the folders that held it, from the top level
@@ -30,13 +28,14 @@ local jetbrains = require("http-nvim.jetbrains")
 ---@field split NuiSplit|nil
 ---@field collection PostmanCollection|nil The loaded collection, written back to `collection_path` on save
 ---@field items PostmanItem[]|nil Top-level items of the loaded collection
----@field expanded table<Node, boolean>
----@field line_nodes table<integer, Node>
+---@field expanded table<PostmanItem, boolean>
+---@field line_nodes table<integer, PostmanItem>
 ---@field line_paths table<integer, string> Slash-separated item names, e.g. `auth/login`
 ---@field line_lists table<integer, PostmanItem[]> The list that holds the item on each line
 ---@field deleted DeletedItem[] Deleted folders and requests, most recent last, for `u`
 ---@field edit_bufs table<PostmanItem, integer> Edit buffer of each request opened with `e`
 ---@field clipboard { node: PostmanItem, mode: "cut"|"copy" }|nil Item marked with `x` (cut) or `y` (copy), pasted by `p`
+---@field view vim.fn.winsaveview.ret|nil Cursor and scroll of the panel when it was last closed, restored on open
 local state = {
     split = nil,
     collection = nil,
@@ -143,7 +142,7 @@ end
 ---@param parent string[]
 ---@return PostmanItem[]|nil list, PostmanItem[] folders The folders along the way, outermost first
 local function resolve_parent(parent)
-    local list = state.items
+    local list = state.items or {}
     local folders = {}
     for _, name in ipairs(parent) do
         local folder
@@ -163,7 +162,7 @@ local function resolve_parent(parent)
     return list, folders
 end
 
----@param node Node
+---@param node { item: PostmanItem[]|nil, request: PostmanRequest|string|nil }
 ---@return integer
 local function count_requests(node)
     if node.request then
@@ -176,7 +175,7 @@ local function count_requests(node)
     return total
 end
 
----@param nodes Node[]
+---@param nodes PostmanItem[]
 ---@param depth integer
 ---@param lines string[]
 ---@param parent_path string
@@ -193,8 +192,7 @@ local function render_items(nodes, depth, lines, parent_path)
             if node.item and #node.item > 0 then
                 marker = state.expanded[node] and "▾ " or "▸ "
             end
-            local name = node.info and node.info.name or node.name
-            table.insert(lines, indent .. marker .. "(" .. count_requests(node) .. ") " .. name)
+            table.insert(lines, indent .. marker .. "(" .. count_requests(node) .. ") " .. node.name)
         end
         state.line_nodes[#lines] = node
         state.line_paths[#lines] = path:sub(2)
@@ -238,7 +236,7 @@ local function render()
     end
 end
 
----@param node Node
+---@param node PostmanItem
 local function move_cursor_to(node)
     for line, line_node in pairs(state.line_nodes) do
         if line_node == node then
@@ -657,7 +655,9 @@ local function create_item()
             end
             render()
             vim.api.nvim_set_current_win(state.split.winid)
-            move_cursor_to(last)
+            if last then
+                move_cursor_to(last)
+            end
             return
         end
         local name = table.remove(names)
@@ -780,6 +780,29 @@ M.open = function()
     vim.bo[state.split.bufnr].filetype = "http-nvim"
 
     state.split:mount()
+
+    local winid = state.split.winid
+    if state.view then
+        -- Clamp in case the panel has fewer lines now
+        local view = vim.deepcopy(state.view)
+
+        if view then
+            view.lnum = math.min(view.lnum, vim.api.nvim_buf_line_count(state.split.bufnr))
+            vim.api.nvim_win_call(winid, function()
+                vim.fn.winrestview(view)
+            end)
+        end
+    end
+    -- Saved on leaving: by WinClosed the window is already invalid
+    vim.api.nvim_create_autocmd("WinLeave", {
+        group = vim.api.nvim_create_augroup("http-nvim-panel-view", { clear = true }),
+        buffer = state.split.bufnr,
+        callback = function()
+            if vim.api.nvim_get_current_win() == winid then
+                state.view = vim.fn.winsaveview()
+            end
+        end,
+    })
 
     vim.keymap.set("n", "g?", function()
         vim.cmd("help http-nvim")

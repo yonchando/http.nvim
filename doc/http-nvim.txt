@@ -15,7 +15,9 @@ http-nvim helps you do something useful.
 ==============================================================================
 2. KEYMAPS                                             *http-nvim-keymaps*
 
-<leader>ho          Open your collection RESTApi
+<leader>ho          Open your collection RESTApi. The cursor and scroll
+                    position are kept from the last time the panel was
+                    closed.
 <CR> or =           Expand or collapse the collection or folder under the
                     cursor.
 e                   Edit the request under the cursor in JetBrains HTTP
