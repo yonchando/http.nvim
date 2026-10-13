@@ -3,6 +3,7 @@
 local collection = require("http-nvim.collection")
 local env = require("http-nvim.env")
 local jetbrains = require("http-nvim.jetbrains")
+local keymaps = require("http-nvim.keymaps")
 local request = require("http-nvim.request")
 local state = require("http-nvim.state")
 
@@ -177,14 +178,14 @@ local function edit()
     state.edit_bufs[node] = bufnr
 
     -- Send what the buffer holds now, saved or not
-    vim.keymap.set("n", "<leader>hrr", function()
+    keymaps.map("send", function()
         local request, err = jetbrains.from_lines(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), node.request)
         if not request then
             vim.notify("http-nvim: " .. err, vim.log.levels.ERROR)
             return
         end
         send_request(request)
-    end, { buffer = bufnr })
+    end, bufnr)
 
     vim.api.nvim_create_autocmd("BufWriteCmd", {
         buffer = bufnr,

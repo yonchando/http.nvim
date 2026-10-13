@@ -1,16 +1,6 @@
 local http = require("http-nvim")
 
-vim.keymap.set("n", "<leader>ho", function()
-    http.open()
-end)
-
-vim.keymap.set("n", "<leader>hrp", function()
-    http.preview_last()
-end)
-
-vim.keymap.set("n", "<leader>hre", function()
-    http.run_last()
-end)
+http.map_global_keys()
 
 vim.api.nvim_create_user_command("Http", function(cmd)
     local sub = cmd.fargs[1]

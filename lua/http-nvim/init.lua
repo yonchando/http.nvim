@@ -1,4 +1,5 @@
 local collections = require("http-nvim.collections")
+local keymaps = require("http-nvim.keymaps")
 local panel = require("http-nvim.panel")
 local request = require("http-nvim.request")
 local state = require("http-nvim.state")
@@ -25,8 +26,19 @@ M.preview_last = request.preview_last
 --- Send the last request again, with the current environment values.
 M.run_last = request.run_last
 
+--- Set the global keymaps (`open`, `preview_last`, `run_last`). Called by the plugin
+--- file, and again by `setup()` so that keymaps given there replace them.
+M.map_global_keys = function()
+    keymaps.apply_global({
+        open = M.open,
+        preview_last = M.preview_last,
+        run_last = M.run_last,
+    })
+end
+
 ---@class HttpNvimOptions
 ---@field collection_dir string|nil Folder holding one folder per collection; defaults to `stdpath("data")/http-nvim/collections`
+---@field keymaps table<string, HttpNvimKeys>|nil Keys per action, replacing the defaults in `keymaps.lua`; `false` unmaps
 
 --- Configure the plugin. `collection_dir` may use `~` and environment variables.
 ---@param opts HttpNvimOptions|nil
@@ -35,6 +47,10 @@ M.setup = function(opts)
     vim.validate("collection_dir", opts.collection_dir, "string", true)
     if opts.collection_dir then
         state.collection_dir = (vim.fn.fnamemodify(vim.fn.expand(opts.collection_dir), ":p"):gsub("/$", ""))
+    end
+    if opts.keymaps then
+        keymaps.configure(opts.keymaps)
+        M.map_global_keys()
     end
 end
 

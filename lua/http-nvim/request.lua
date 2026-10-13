@@ -4,6 +4,7 @@ local Popup = require("nui.popup")
 local config = require("http-nvim.config")
 local env = require("http-nvim.env")
 local jetbrains = require("http-nvim.jetbrains")
+local keymaps = require("http-nvim.keymaps")
 local state = require("http-nvim.state")
 
 local ns = config.ns
@@ -132,17 +133,10 @@ local function open_response_layout()
     layout:mount()
 
     for _, popup in ipairs({ header, content, sidebar_right }) do
-        vim.keymap.set("n", "q", function()
-            layout:unmount()
-        end, { buffer = popup.bufnr })
+        keymaps.map("close", function() layout:unmount() end, popup.bufnr)
     end
-
-    vim.keymap.set("n", "<C-l>", function()
-        vim.api.nvim_set_current_win(sidebar_right.winid)
-    end, { buffer = content.bufnr })
-    vim.keymap.set("n", "<C-h>", function()
-        vim.api.nvim_set_current_win(content.winid)
-    end, { buffer = sidebar_right.bufnr })
+    keymaps.map("focus_headers", function() vim.api.nvim_set_current_win(sidebar_right.winid) end, content.bufnr)
+    keymaps.map("focus_response", function() vim.api.nvim_set_current_win(content.winid) end, sidebar_right.bufnr)
 
     return { header = header, content = content, sidebar_right = sidebar_right }
 end
