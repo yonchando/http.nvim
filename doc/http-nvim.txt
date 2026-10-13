@@ -12,14 +12,39 @@ CONTENTS                                              *http-nvim-contents*
 ==============================================================================
 1. INTRODUCTION                                          *http-nvim-intro*
 
-http-nvim helps you do something useful.
+http-nvim keeps your API requests in Postman collections and lets you
+browse, edit and send them without leaving Neovim.
+
+- Browse a collection's folders and requests in a side panel.
+- Edit a request as a `.http` file (JetBrains HTTP Client format) and save
+  it back to the collection.
+- Keep environment variables per collection and use them in requests as
+  `{{key}}`.
+- Send a request with curl and see the status, response and headers in a
+  floating window.
+
+Each collection lives in its own folder, holding `collection.json` (a
+Postman v2.1 collection) and `env.json` (a Postman environment), so both
+can be imported into Postman, and Postman exports can be used here.
+
+Requirements:
+- Neovim with the tree-sitter `http` parser (`:TSInstall http`)
+- nui.nvim
+- curl
+
+Quick start:
+1. `:Http create my-api` to create a collection.
+2. `<leader>ho` to open the panel, then `a` to add a request.
+3. Fill in the request and save it with |:w|.
+4. `<leader>hrr` on the request to send it.
 
 ==============================================================================
 2. CONFIGURATION                                         *http-nvim-config*
 
 Each collection is a folder holding `collection.json` (a Postman v2.1
-collection) and `env.json` (its environment variables). Call `setup()` to
-choose where those folders are kept: >lua
+collection) and `env.json` (a Postman environment: a `values` list of
+`{ key, value, type, enabled }`). Call `setup()` to choose where those
+folders are kept: >lua
 
     require("http-nvim").setup({
         collection_dir = "~/api",
@@ -28,6 +53,19 @@ choose where those folders are kept: >lua
 collection_dir      Folder holding one folder per collection. Defaults
                     to `stdpath("data")/http-nvim/collections`. May use
                     `~` and environment variables.
+keymaps             Keys per action, see |http-nvim-keymaps|. Each value
+                    is a key, a list of keys, or `false` to leave the
+                    action unmapped. An action you set replaces its
+                    default keys; the others keep theirs. >lua
+
+    require("http-nvim").setup({
+        keymaps = {
+            open = "<leader>o",
+            send = { "<leader>s", "S" },
+            undo = false,
+        },
+    })
+<
 
 ==============================================================================
 3. COMMANDS                                           *http-nvim-commands*
@@ -49,91 +87,69 @@ collection_dir      Folder holding one folder per collection. Defaults
 ==============================================================================
 4. KEYMAPS                                             *http-nvim-keymaps*
 
-<leader>ho          Open your collection RESTApi. If no collection is
-                    chosen yet, ask which one first, as |:Http| does.
-                    The cursor and scroll position are kept from the
-                    last time the panel was closed.
-<leader>hrp         Show the last request sent and its response again,
-                    from anywhere, without sending it. If the response
-                    is still on its way, it fills in when it arrives.
-<leader>hre         Send the last request again, from anywhere. Its
-                    `{{key}}` values are read from the environment as
-                    it is now.
-<leader>hrr         With the cursor on a request, send it with curl and
-                    show it in a floating layout. The top box shows the
-                    method, URL and status code with the time taken.
-                    Below it, the left box (70% of the width) shows the
-                    response, pretty-printed when it is JSON, or curl's
-                    error; the right box (30%) shows the request and
-                    response headers from curl's verbose output.
-                    Every `{{key}}` in the URL, headers and raw body is
-                    replaced with the environment variable `key`;
-                    unknown keys are left as is. Disabled headers and
-                    non-raw bodies are not sent. Press q in any box to
-                    close the layout. All boxes are read-only. <C-l> in
-                    the response box moves to the headers box, and
-                    <C-h> moves back.
-                    Also works in an edit buffer opened with |e|: it
-                    sends the buffer as it is now, saved or not.
-<CR> or =           Expand or collapse the collection or folder under the
-                    cursor.
-e                   Edit the request under the cursor in JetBrains HTTP
-                    Client format, in a new split above the panel.
-                    Closing that window returns to the panel.
-                    |:w| saves the request and rewrites the collection
-                    JSON file (keys sorted, 4-space indent). Only the
-                    first `### name` section is kept; other sections are
-                    removed from the buffer. Changing the `### name` line
-                    renames the request.
-                    On the environment variables, edit them all as
-                    `KEY=value` lines, like a `.env` file. Blank lines
-                    and `#` comments are skipped, and quotes around a
-                    value are removed. |:w| rewrites the environment
-                    JSON file; a line without `=` or a repeated name
-                    is an error and nothing is saved.
-r                   Rename the request or folder under the cursor. Open
-                    edit buffers follow the new name.
-a                   Add a request or folder: inside the folder under the
-                    cursor, next to the request under the cursor, or at
-                    the top level on any other line.
-                    `get-users` adds a request and opens it for editing.
-                    It starts as `GET` with an empty URL; fill in the URL
-                    before |:w|.
-                    `api/v1/get-users` adds the request inside folders
-                    `api/v1`.
-                    `api/v1/` (ending with `/`) adds only the folders.
-                    Folders that already exist along the path are reused.
-D                   Delete the request or folder (with everything in it)
-                    under the cursor, after confirming.
-                    Edit buffers of the deleted requests are closed;
-                    the prompt warns if any has unsaved changes.
+Every key can be changed with the `keymaps` option of `setup()`
+(|http-nvim-config|). Use the action name from this table as the key.
+Panel keys work in the panel, and response keys in the layout that
+`send` opens.
+
+  Action            Default key   Description
+  `open`              <leader>ho    Open the collection panel (anywhere)
+  `preview_last`      <leader>hrp   Show the last response again (anywhere)
+  `run_last`          <leader>hre   Send the last request again (anywhere)
+  `send`              <leader>hrr   Send the request (panel, edit buffer)
+  `help`              g?            Open this help
+  `toggle`            <CR> and =    Expand or collapse a folder
+  `edit`              e             Edit a request or the variables
+  `rename`            r             Rename a request or folder
+  `add`               a             Add a request or folder
+  `delete`            D             Delete a request or folder
+  `cut`               x             Cut, to move with paste
+  `copy`              y             Copy, to duplicate with paste
+  `paste`             p             Paste the cut or copied item
+  `cancel_clipboard`  <Esc>         Cancel a cut or copy
+  `move_down`         ]m            Move down among its siblings
+  `move_up`           [m            Move up among its siblings
+  `undo`              u             Undo the last delete
+  `close`             q             Close the response layout
+  `focus_headers`     <C-l>         Go to the headers box (response)
+  `focus_response`    <C-h>         Go to the response box (headers)
+
+Each key is described below.
+
+<leader>ho          Open the collection panel. If no collection is chosen
+                    yet, ask which one first, as |:Http| does.
+<leader>hrp         Show the last request and its response again,
+                    without sending it.
+<leader>hre         Send the last request again.
+<leader>hrr         Send the request under the cursor, or the edit
+                    buffer as it is now, and show the response.
+                    `{{key}}` is replaced with the environment variable.
+g?                  Open this help.
+<CR> or =           Expand or collapse the folder under the cursor.
+e                   Edit the request under the cursor as a `.http` file
+                    (JetBrains HTTP Client format); |:w| saves it.
+                    On the environment variables, edit them as
+                    `KEY=value` lines; `# KEY=value` is a disabled
+                    variable, which `{{key}}` does not use.
+r                   Rename the request or folder under the cursor.
+a                   Add a request or folder. `a/b/name` also creates the
+                    folders `a/b`; `a/b/` adds only the folders.
+D                   Delete the request or folder under the cursor, after
+                    confirming.
 x                   Cut the request or folder under the cursor, to move
-                    it with |p|. Nothing changes until you paste; the cut
-                    item is underlined (`httpNvimCut`).
+                    it with p.
 y                   Copy the request or folder under the cursor, to
-                    duplicate it with |p|. The copied item is underlined
-                    (`httpNvimCopy`).
-p                   Paste into the folder under the cursor, or to the top
-                    level on any other line (including a request).
-                    After |x| the item is moved and open edit buffers
-                    follow the new path. After |y| a copy is added,
-                    named `name copy` (`name copy 2`, ...) if the name is
-                    taken; the copy stays on the clipboard so |p| can
-                    paste it again.
-<Esc>               Cancel the cut or copy started with |x| or |y|.
-]m                  Move the request or folder under the cursor down
-                    among its siblings ([count] places). It never leaves
-                    its folder.
-[m                  Same as |]m|, but up.
-u                   Undo the last deletion, putting the request or folder
-                    back where it was and expanding the folders that hold
-                    it. Repeat to undo older deletions.
-                    When 'undofile' is set, the deletions are kept in a
-                    file in the first 'undodir' entry, so |u| still works
-                    after restarting Neovim. Otherwise they are lost on
-                    exit.
-                    |r|, |a|, |p|, |]m|, |[m|, |D| and |u| rewrite the
-                    collection JSON file.
+                    duplicate it with p.
+p                   Paste into the folder under the cursor, or at the top
+                    level.
+<Esc>               Cancel a cut or copy.
+]m                  Move the request or folder down among its siblings.
+[m                  Move the request or folder up among its siblings.
+u                   Undo the last delete. With 'undofile' set, this
+                    works after restarting Neovim.
+q                   In the response layout: close it.
+<C-l>               In the response layout: go to the headers box.
+<C-h>               In the response layout: go back to the response.
 
 ==============================================================================
 5. HIGHLIGHTS                                       *http-nvim-highlights*
@@ -149,6 +165,7 @@ vim-fugitive. Override any of them with |:highlight|.
   httpNvimEntry        Entry key in `KEY = value`       links to Identifier
   httpNvimEquals       The `=` in an entry              links to Operator
   httpNvimValue        Entry value                     links to String
+  httpNvimDisabled     Disabled entry, `# KEY = value`   links to Comment
   httpNvimItemCount    Item count, the `N` in `(N) name` links to httpNvimCount
   httpNvimItem         Item name, e.g. a collection    links to |hl-Directory|
   httpNvimFold         Expand/collapse marker `▸`/`▾`    links to Special
