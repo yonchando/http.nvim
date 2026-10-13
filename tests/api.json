@@ -46,11 +46,6 @@
                     "request": {
                         "body": {
                             "mode": "raw",
-                            "options": {
-                                "raw": {
-                                    "language": "json"
-                                }
-                            },
                             "raw": "{\n    \"username\": \"admin\",\n    \"password\": \"password\",\n    \"remember_me\": true\n}"
                         },
                         "header": [
@@ -123,7 +118,7 @@
                         "header": [],
                         "method": "GET",
                         "url": {
-                            "raw": "{{url}}/sanctum/csrf-cookie"
+                            "raw": "{{base_url}}/sanctum/csrf-cookie"
                         }
                     },
                     "response": []
@@ -366,7 +361,12 @@
         {
             "name": "heathly",
             "request": {
-                "header": [],
+                "header": [
+                    {
+                        "key": "Accept",
+                        "value": "application/json"
+                    }
+                ],
                 "method": "GET",
                 "url": {
                     "raw": "{{url}}/up"
