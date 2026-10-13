@@ -76,7 +76,11 @@ local function create(name)
     local ok, result = pcall(function()
         vim.fn.mkdir(dir, "p")
         local wrote_collection = write_new_json(dir .. "/collection.json", collection.empty(name))
-        local wrote_env = write_new_json(dir .. "/env.json", { values = vim.empty_dict() })
+        local wrote_env = write_new_json(dir .. "/env.json", {
+            name = name,
+            values = {},
+            _postman_variable_scope = "environment",
+        })
         return wrote_collection or wrote_env
     end)
     if not ok then

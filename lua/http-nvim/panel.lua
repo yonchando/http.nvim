@@ -24,7 +24,7 @@ local edit = edit_mod.edit
 local edit_bufs_under = edit_mod.edit_bufs_under
 local rename_edit_bufs = edit_mod.rename_edit_bufs
 local load_env = env.load_env
-local env_text = env.env_text
+local env_line = env.env_line
 local send_request = request.send_request
 
 ---@param nodes PostmanItem[]
@@ -56,17 +56,15 @@ local function render_items(nodes, depth, lines, parent_path)
 end
 
 local function render()
-    local keys = vim.tbl_keys(state.env)
-    table.sort(keys)
     local lines = {
         "Help: g?",
         "",
-        "Environment variables (" .. #keys .. ")",
+        "Environment variables (" .. #state.env .. ")",
     }
     state.line_env = { [#lines] = "" }
-    for _, key in ipairs(keys) do
-        table.insert(lines, key .. " = " .. env_text(state.env[key]))
-        state.line_env[#lines] = key
+    for _, var in ipairs(state.env) do
+        table.insert(lines, env_line(var, " = "))
+        state.line_env[#lines] = var.key
     end
     table.insert(lines, "")
     table.insert(lines, "Collection (" .. count_requests({ item = state.items }) .. ")")

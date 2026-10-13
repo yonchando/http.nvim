@@ -8,7 +8,7 @@ local request = require("http-nvim.request")
 local state = require("http-nvim.state")
 
 local write_collection = collection.write_collection
-local env_text = env.env_text
+local env_line = env.env_line
 local parse_env_lines = env.parse_env_lines
 local write_env = env.write_env
 local send_request = request.send_request
@@ -94,11 +94,9 @@ local function edit_env()
         if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
             vim.api.nvim_buf_delete(bufnr, { force = true })
         end
-        local keys = vim.tbl_keys(state.env)
-        table.sort(keys)
-        local lines = vim.tbl_map(function(k)
-            return k .. "=" .. env_text(state.env[k])
-        end, keys)
+        local lines = vim.tbl_map(function(var)
+            return env_line(var, "=")
+        end, state.env)
 
         bufnr = vim.api.nvim_create_buf(true, false)
         vim.api.nvim_buf_set_name(bufnr, "http-nvim-env://" .. vim.fn.fnamemodify(state.env_path, ":t") .. " (edit)")
@@ -136,7 +134,7 @@ local function edit_env()
     -- Land on the variable that was under the cursor in the panel
     if key and key ~= "" then
         for i, line in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
-            if vim.trim(line):match("^([^=%s]+)") == key then
+            if vim.trim(line):gsub("^#%s*", ""):match("^([^=%s]+)") == key then
                 vim.api.nvim_win_set_cursor(0, { i, 0 })
                 break
             end

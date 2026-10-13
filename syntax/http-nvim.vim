@@ -11,11 +11,12 @@ syn match httpNvimHelpHeader /^Help:/ nextgroup=httpNvimHelpTag skipwhite
 syn match httpNvimHelpTag    /\S\+/ contained
 
 " Sections:  "Environment variables (2)", "Collection (3)" ... until blank line
-syn region httpNvimSection start=/^\%(.*(\d\+)$\)\@=/ end=/^$/ contains=httpNvimHeading,httpNvimEntry,httpNvimFold,httpNvimItemCount,httpNvimMethod
+syn region httpNvimSection start=/^\%(.*(\d\+)$\)\@=/ end=/^$/ contains=httpNvimHeading,httpNvimDisabled,httpNvimEntry,httpNvimFold,httpNvimItemCount,httpNvimMethod
 syn match httpNvimHeading /^[A-Z][a-z][^:]*\ze (\d\+)$/ contained nextgroup=httpNvimCount skipwhite
 syn match httpNvimCount   /(\d\+)/hs=s+1,he=e-1 contained
 
-" Section entries:  "KEY = value"
+" Section entries:  "KEY = value", and "# KEY = value" when disabled
+syn match httpNvimDisabled /^# .*$/ contained
 syn match httpNvimEntry  /^\S\+\ze\s*=/ contained nextgroup=httpNvimEquals skipwhite
 syn match httpNvimEquals /=/ contained nextgroup=httpNvimValue skipwhite
 syn match httpNvimValue  /.*$/ contained
@@ -38,6 +39,7 @@ hi def link httpNvimCount      Number
 hi def link httpNvimEntry      Identifier
 hi def link httpNvimEquals     Operator
 hi def link httpNvimValue      String
+hi def link httpNvimDisabled   Comment
 hi def link httpNvimItemCount  httpNvimCount
 hi def link httpNvimFoldCount  httpNvimItemCount
 hi def link httpNvimItem       Directory

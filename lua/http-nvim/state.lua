@@ -6,7 +6,7 @@
 ---@field split NuiSplit|nil
 ---@field collection PostmanCollection|nil The loaded collection, written back to `collection_path` on save
 ---@field items PostmanItem[]|nil Top-level items of the loaded collection
----@field env table<string, any> Environment variables loaded from `env_path`
+---@field env EnvVar[] Environment variables loaded from `env_path`, in file order
 ---@field env_file table The whole decoded environment file, written back with new `values` on save
 ---@field env_buf integer|nil Edit buffer of the environment variables, opened with `e`
 ---@field line_env table<integer, string> Lines of the environment section: the variable name, or "" for the heading
