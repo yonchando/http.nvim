@@ -64,6 +64,8 @@ local state = {
 local M = {}
 
 local ns = vim.api.nvim_create_namespace("http-nvim")
+-- Also used outside the panel, whose syntax file defines it, e.g. by `<leader>hl` before the panel opens
+vim.api.nvim_set_hl(0, "httpNvimMethod", { link = "Keyword", default = true })
 
 -- TODO: let users choose collection files; for now load the test fixture
 local collection_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h:h") .. "/tests/api.json"
@@ -1068,6 +1070,13 @@ local function open_response_layout()
         end, { buffer = popup.bufnr })
     end
 
+    vim.keymap.set("n", "<C-l>", function()
+        vim.api.nvim_set_current_win(sidebar_right.winid)
+    end, { buffer = content.bufnr })
+    vim.keymap.set("n", "<C-h>", function()
+        vim.api.nvim_set_current_win(content.winid)
+    end, { buffer = sidebar_right.bufnr })
+
     return { header = header, content = content, sidebar_right = sidebar_right }
 end
 
@@ -1075,6 +1084,15 @@ end
 local function show_view(view)
     for _, boxes in ipairs(view.boxes) do
         set_readonly_lines(boxes.header.bufnr, { view.request_line, view.status })
+        local header = boxes.header.bufnr
+        if header and vim.api.nvim_buf_is_valid(header) then
+            -- Redrawn when the response arrives: drop the previous highlight
+            vim.api.nvim_buf_clear_namespace(header, ns, 0, -1)
+            vim.api.nvim_buf_set_extmark(header, ns, 0, 0, {
+                end_col = #view.request_line:match("^%S*"),
+                hl_group = "httpNvimMethod",
+            })
+        end
         set_readonly_lines(boxes.content.bufnr, view.content)
         set_readonly_lines(boxes.sidebar_right.bufnr, view.sidebar_right)
         local bufnr = boxes.content.bufnr
@@ -1195,7 +1213,7 @@ M.open = function()
     vim.keymap.set("n", "]m", function() move_sibling(1) end, { buffer = state.split.bufnr })
     vim.keymap.set("n", "[m", function() move_sibling(-1) end, { buffer = state.split.bufnr })
     vim.keymap.set("n", "e", edit, { buffer = state.split.bufnr })
-    vim.keymap.set("n", "<leader>hr", make_request, { buffer = state.split.bufnr })
+    vim.keymap.set("n", "<leader>hrr", make_request, { buffer = state.split.bufnr })
     vim.keymap.set("n", "r", rename_item, { buffer = state.split.bufnr })
     vim.keymap.set("n", "D", delete_item, { buffer = state.split.bufnr })
     vim.keymap.set("n", "u", undo_delete, { buffer = state.split.bufnr })

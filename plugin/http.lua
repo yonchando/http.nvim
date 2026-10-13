@@ -4,11 +4,11 @@ vim.keymap.set("n", "<leader>ho", function()
     http.open()
 end)
 
-vim.keymap.set("n", "<leader>hp", function()
+vim.keymap.set("n", "<leader>hrp", function()
     http.preview_last()
 end)
 
-vim.keymap.set("n", "<leader>hl", function()
+vim.keymap.set("n", "<leader>hre", function()
     http.run_last()
 end)
 

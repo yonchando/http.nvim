@@ -35,7 +35,9 @@ http-nvim helps you do something useful.
                     replaced with the environment variable `key`;
                     unknown keys are left as is. Disabled headers and
                     non-raw bodies are not sent. Press q in any box to
-                    close the layout. All boxes are read-only.
+                    close the layout. All boxes are read-only. <C-l> in
+                    the response box moves to the headers box, and
+                    <C-h> moves back.
                     Also works in an edit buffer opened with |e|: it
                     sends the buffer as it is now, saved or not.
 <CR> or =           Expand or collapse the collection or folder under the
