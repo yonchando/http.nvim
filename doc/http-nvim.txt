@@ -4,8 +4,10 @@
 CONTENTS                                              *http-nvim-contents*
 
   1. Introduction .................... |http-nvim-intro|
-  2. Keymaps ......................... |http-nvim-keymaps|
-  3. Highlights ...................... |http-nvim-highlights|
+  2. Configuration ................... |http-nvim-config|
+  3. Commands ........................ |http-nvim-commands|
+  4. Keymaps ......................... |http-nvim-keymaps|
+  5. Highlights ...................... |http-nvim-highlights|
 
 ==============================================================================
 1. INTRODUCTION                                          *http-nvim-intro*
@@ -13,18 +15,51 @@ CONTENTS                                              *http-nvim-contents*
 http-nvim helps you do something useful.
 
 ==============================================================================
-2. KEYMAPS                                             *http-nvim-keymaps*
+2. CONFIGURATION                                         *http-nvim-config*
 
-<leader>ho          Open your collection RESTApi. The cursor and scroll
-                    position are kept from the last time the panel was
-                    closed.
-<leader>hp          Show the last request sent and its response again,
+Each collection is a folder holding `collection.json` (a Postman v2.1
+collection) and `env.json` (its environment variables). Call `setup()` to
+choose where those folders are kept: >lua
+
+    require("http-nvim").setup({
+        collection_dir = "~/api",
+    })
+<
+collection_dir      Folder holding one folder per collection. Defaults
+                    to `stdpath("data")/http-nvim/collections`. May use
+                    `~` and environment variables.
+
+==============================================================================
+3. COMMANDS                                           *http-nvim-commands*
+
+:Http                                                              *:Http*
+                    List the collections in `collection_dir` with
+                    |vim.ui.select()| and open the chosen one in the
+                    panel. Switching collections closes the panel and
+                    the edit buffers of the previous one; if one of
+                    them has unsaved changes, nothing is switched.
+
+:Http create {name}                                         *:Http-create*
+                    Create the collection {name}: a folder in
+                    `collection_dir` with an empty `collection.json` and
+                    `env.json`. Files that already exist are left as
+                    they are. If no collection is chosen yet, {name}
+                    becomes the chosen one.
+
+==============================================================================
+4. KEYMAPS                                             *http-nvim-keymaps*
+
+<leader>ho          Open your collection RESTApi. If no collection is
+                    chosen yet, ask which one first, as |:Http| does.
+                    The cursor and scroll position are kept from the
+                    last time the panel was closed.
+<leader>hrp         Show the last request sent and its response again,
                     from anywhere, without sending it. If the response
                     is still on its way, it fills in when it arrives.
-<leader>hl          Send the last request again, from anywhere. Its
+<leader>hre         Send the last request again, from anywhere. Its
                     `{{key}}` values are read from the environment as
                     it is now.
-<leader>hr          With the cursor on a request, send it with curl and
+<leader>hrr         With the cursor on a request, send it with curl and
                     show it in a floating layout. The top box shows the
                     method, URL and status code with the time taken.
                     Below it, the left box (70% of the width) shows the
@@ -101,7 +136,7 @@ u                   Undo the last deletion, putting the request or folder
                     collection JSON file.
 
 ==============================================================================
-3. HIGHLIGHTS                                       *http-nvim-highlights*
+5. HIGHLIGHTS                                       *http-nvim-highlights*
 
 The panel buffer (filetype `http-nvim`) defines these groups, styled after
 vim-fugitive. Override any of them with |:highlight|.

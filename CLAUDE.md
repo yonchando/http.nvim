@@ -4,13 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-http.nvim is a Neovim plugin (pure Lua, LuaJIT) for browsing a Postman collection and editing its requests as `.http` (JetBrains HTTP Client format) buffers. This branch is a **rewrite in progress**: the v1 implementation (Go helper binary + `cmd.lua`/`ui.lua`/`log.lua`/`floating/window.lua`, `plugin/load_http.lua`) has been removed but is still available in git history (the `main` branch) for reference. `README.md` still documents v1 (`:HttpRun`, `:HttpResult`, `:HttpRerun`, `:HttpClose`, `:HttpHistory`); none of those commands are registered yet. The rewrite sends a request with `curl` from the panel (`<leader>hr`, `make_request()`), replacing `{{key}}` with environment values.
+http.nvim is a Neovim plugin (pure Lua, LuaJIT) for browsing a Postman collection and editing its requests as `.http` (JetBrains HTTP Client format) buffers. This branch is a **rewrite in progress**: the v1 implementation (Go helper binary + `cmd.lua`/`ui.lua`/`log.lua`/`floating/window.lua`, `plugin/load_http.lua`) has been removed but is still available in git history (the `main` branch) for reference. `README.md` still documents v1 (`:HttpRun`, `:HttpResult`, `:HttpRerun`, `:HttpClose`, `:HttpHistory`); none of those commands are registered yet. The rewrite sends a request with `curl` from the panel or an edit buffer (`<leader>hrr`), replacing `{{key}}` with environment values.
 
 ## Architecture
 
-- `plugin/http.lua`: the auto-loaded entrypoint. It maps `<leader>ho` to `require("http-nvim").open()`, and `<leader>hp`/`<leader>hl` to `preview_last()`/`run_last()` (show or resend the last request from anywhere), and runs `helptags` on VimEnter for a hardcoded path (`stdpath("data")/site/pack/chando/start/http.nvim/doc`).
-- `lua/http-nvim/init.lua`: the collection panel and edit buffers. All state lives in the module-local `state` table.
-  - **Loading:** the collection is loaded once into `state.collection`, with `state.items` set to `collection.item`. The path is hardcoded to `tests/api.json` (see the TODO). Edits survive closing and reopening the panel because the collection isn't reloaded. Environment variables are loaded at the same time from the `values` object of `tests/env.json` (a missing file means none) into `state.env`, and listed as `KEY = value` lines under "Environment variables".
+- `plugin/http.lua`: the auto-loaded entrypoint. It registers `:Http` / `:Http create {name}`, maps `<leader>ho` to `require("http-nvim").open()`, and `<leader>hrp`/`<leader>hre` to `preview_last()`/`run_last()` (show or resend the last request from anywhere), and runs `helptags` on VimEnter for a hardcoded path (`stdpath("data")/site/pack/chando/start/http.nvim/doc`).
+- `lua/http-nvim/init.lua`: the public API only (`open`, `preview_last`, `run_last`, `setup`), forwarding to the modules below.
+- `lua/http-nvim/state.lua`: the one shared `state` table (class `State`). Every module requires it and reads or writes it directly. It also holds the options: `collection_dir` (set by `setup({ collection_dir })`, default `stdpath("data")/http-nvim/collections`), `selected` (the chosen collection's folder name) and the derived `collection_path`/`env_path`.
+- `lua/http-nvim/config.lua`: only the `ns` extmark namespace.
+- `lua/http-nvim/collections.lua`: one folder per collection in `collection_dir`. `create(name)` (`:Http create`), `list()`, `pick(on_done)` (`vim.ui.select`, used by `:Http` and by `open()` when nothing is selected) and `select(name)`. Switching closes the panel and the old edit buffers (`edit.close_edit_bufs`, which refuses if one is modified) and resets `state.collection`.
+- `lua/http-nvim/collection.lua`: the Postman types, loading and writing the collection, the undo file for deletions, and tree helpers (`locate`, `ensure_folders`, `count_requests`, ...).
+- `lua/http-nvim/env.lua`: loading, writing and parsing environment variables, and `expand_env` for `{{key}}`.
+- `lua/http-nvim/request.lua`: curl (`send_request`), the response layout, `preview_last`/`run_last`.
+- `lua/http-nvim/edit.lua`: request and environment edit buffers (`e`). It requires `panel` lazily, inside `render()`, because `panel` requires it.
+- `lua/http-nvim/panel.lua`: rendering the panel and its keymaps (`open`).
+
+How the panel and edit buffers work:
+  - **Loading:** the collection is loaded once into `state.collection`, with `state.items` set to `collection.item`. The path is `state.collection_path`, i.e. `<collection_dir>/<selected>/collection.json`; a missing file starts an empty collection, created on the first save. Edits survive closing and reopening the panel because the collection isn't reloaded. Environment variables are loaded at the same time from the `values` object of `state.env_path` (a missing file means none) into `state.env`, and listed as `KEY = value` lines under "Environment variables".
   - **Panel:** a nui.nvim `Split`, filetype `http-nvim`.
   - **Rendering:** `render()` rebuilds the lines and fills `state.line_nodes` and `state.line_paths` (both keyed by line number). Keymaps use them to find the item under the cursor. Folder expansion is kept in `state.expanded`, keyed by node table.
   - **`e` (`edit()`):** opens the request in an `aboveleft split` of the panel. The buffer is named `http-nvim://<path> (edit)` and uses `buftype=acwrite`, `filetype=http`.
@@ -46,4 +56,4 @@ To check behavior without a UI, write a Lua script and run it headless. Drive ke
 nvim --headless --cmd "set rtp+=. rtp+=/path/to/nui.nvim" -c "luafile script.lua" -c "qa!"
 ```
 
-Saving an edit buffer rewrites `tests/api.json`, so back it up before testing saves and restore it afterwards. `*.http` files are gitignored, so scratch request files can live in the repo root.
+The test fixtures are `tests/collection.json` and `tests/env.json`, i.e. the collection `tests` with the repo root as `collection_dir`. Load them in a headless script with `require("http-nvim").setup({ collection_dir = vim.fn.getcwd() })` then `require("http-nvim.collections").select("tests")`. Saving rewrites them, so back them up before testing saves and restore them afterwards. To keep a headless test away from the real `stdpath("data")`, set `XDG_DATA_HOME` to a scratch folder and run with `--clean` (otherwise the user config reinstalls its plugins there), adding `~/.local/share/nvim/site` to `rtp` for the tree-sitter `http` parser and running `runtime plugin/http.lua` for the commands and keymaps. `*.http` files are gitignored, so scratch request files can live in the repo root.
