@@ -369,7 +369,7 @@
                 ],
                 "method": "GET",
                 "url": {
-                    "raw": "{{url}}/up"
+                    "raw": "{{base_url}}/up"
                 }
             }
         }
