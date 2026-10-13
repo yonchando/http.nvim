@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-http.nvim is a Neovim plugin (pure Lua, LuaJIT) for browsing a Postman collection and editing its requests as `.http` (JetBrains HTTP Client format) buffers. This branch is a **rewrite in progress**: the v1 implementation (Go helper binary + `cmd.lua`/`ui.lua`/`log.lua`/`floating/window.lua`, `plugin/load_http.lua`) has been removed but is still available in git history (the `main` branch) for reference. `README.md` still documents v1 (`:HttpRun`, `:HttpResult`, `:HttpRerun`, `:HttpClose`, `:HttpHistory`); none of those commands are registered yet, and the rewrite does not send requests yet.
+http.nvim is a Neovim plugin (pure Lua, LuaJIT) for browsing a Postman collection and editing its requests as `.http` (JetBrains HTTP Client format) buffers. This branch is a **rewrite in progress**: the v1 implementation (Go helper binary + `cmd.lua`/`ui.lua`/`log.lua`/`floating/window.lua`, `plugin/load_http.lua`) has been removed but is still available in git history (the `main` branch) for reference. `README.md` still documents v1 (`:HttpRun`, `:HttpResult`, `:HttpRerun`, `:HttpClose`, `:HttpHistory`); none of those commands are registered yet. The rewrite sends a request with `curl` from the panel (`<leader>hr`, `make_request()`), replacing `{{key}}` with environment values.
 
 ## Architecture
 
-- `plugin/http.lua`: the auto-loaded entrypoint. It maps `<leader>rr` to `require("http-nvim").open()` and runs `helptags` on VimEnter for a hardcoded path (`stdpath("data")/site/pack/chando/start/http.nvim/doc`).
+- `plugin/http.lua`: the auto-loaded entrypoint. It maps `<leader>ho` to `require("http-nvim").open()`, and `<leader>hp`/`<leader>hl` to `preview_last()`/`run_last()` (show or resend the last request from anywhere), and runs `helptags` on VimEnter for a hardcoded path (`stdpath("data")/site/pack/chando/start/http.nvim/doc`).
 - `lua/http-nvim/init.lua`: the collection panel and edit buffers. All state lives in the module-local `state` table.
-  - **Loading:** the collection is loaded once into `state.collection`, with `state.items` set to `collection.item`. The path is hardcoded to `tests/api.json` (see the TODO). Edits survive closing and reopening the panel because the collection isn't reloaded.
+  - **Loading:** the collection is loaded once into `state.collection`, with `state.items` set to `collection.item`. The path is hardcoded to `tests/api.json` (see the TODO). Edits survive closing and reopening the panel because the collection isn't reloaded. Environment variables are loaded at the same time from the `values` object of `tests/env.json` (a missing file means none) into `state.env`, and listed as `KEY = value` lines under "Environment variables".
   - **Panel:** a nui.nvim `Split`, filetype `http-nvim`.
   - **Rendering:** `render()` rebuilds the lines and fills `state.line_nodes` and `state.line_paths` (both keyed by line number). Keymaps use them to find the item under the cursor. Folder expansion is kept in `state.expanded`, keyed by node table.
   - **`e` (`edit()`):** opens the request in an `aboveleft split` of the panel. The buffer is named `http-nvim://<path> (edit)` and uses `buftype=acwrite`, `filetype=http`.

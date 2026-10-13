@@ -1,3 +1,5 @@
+local Layout = require("nui.layout")
+local Popup = require("nui.popup")
 local Split = require("nui.split")
 local jetbrains = require("http-nvim.jetbrains")
 
@@ -28,6 +30,11 @@ local jetbrains = require("http-nvim.jetbrains")
 ---@field split NuiSplit|nil
 ---@field collection PostmanCollection|nil The loaded collection, written back to `collection_path` on save
 ---@field items PostmanItem[]|nil Top-level items of the loaded collection
+---@field env table<string, any> Environment variables loaded from `env_path`
+---@field env_file table The whole decoded environment file, written back with new `values` on save
+---@field env_buf integer|nil Edit buffer of the environment variables, opened with `e`
+---@field line_env table<integer, string> Lines of the environment section: the variable name, or "" for the heading
+---@field last_view ResponseView|nil The last request sent, for `<leader>hp` and `<leader>hl`
 ---@field expanded table<PostmanItem, boolean>
 ---@field line_nodes table<integer, PostmanItem>
 ---@field line_paths table<integer, string> Slash-separated item names, e.g. `auth/login`
@@ -40,6 +47,11 @@ local state = {
     split = nil,
     collection = nil,
     items = nil,
+    env = {},
+    env_file = {},
+    env_buf = nil,
+    line_env = {},
+    last_view = nil,
     expanded = {},
     line_nodes = {},
     line_paths = {},
@@ -55,6 +67,7 @@ local ns = vim.api.nvim_create_namespace("http-nvim")
 
 -- TODO: let users choose collection files; for now load the test fixture
 local collection_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h:h") .. "/tests/api.json"
+local env_path = vim.fn.fnamemodify(collection_path, ":h") .. "/env.json"
 
 ---@param path string
 ---@return PostmanCollection
@@ -68,6 +81,45 @@ local function load_collection(path)
     end
     collection.item = collection.item or {}
     return collection
+end
+
+--- Read an environment file. A missing file means no variables.
+---@param path string
+---@return table<string, any> values, table file The whole decoded file
+local function load_env(path)
+    if vim.fn.filereadable(path) == 0 then
+        return {}, {}
+    end
+    local ok, env = pcall(function()
+        return vim.json.decode(table.concat(vim.fn.readfile(path), "\n"), { luanil = { object = true, array = true } })
+    end)
+    if not ok or type(env) ~= "table" or (env.values ~= nil and type(env.values) ~= "table") then
+        vim.notify("http-nvim: failed to load environment " .. path, vim.log.levels.ERROR)
+        return {}, {}
+    end
+    return env.values or {}, env
+end
+
+---@return boolean
+local function write_env()
+    local ok, err = pcall(function()
+        local file = vim.tbl_extend("force", state.env_file, { values = state.env })
+        local json = vim.json.encode(file, { indent = "    ", sort_keys = true })
+        if vim.fn.writefile(vim.split(json, "\n", { plain = true }), env_path) ~= 0 then
+            error("cannot write file")
+        end
+    end)
+    if not ok then
+        vim.notify("http-nvim: failed to write environment " .. env_path .. ": " .. tostring(err), vim.log.levels.ERROR)
+    end
+    return ok
+end
+
+--- How a value shows in the panel and the edit buffer: strings as is, anything else as JSON.
+---@param value any
+---@return string
+local function env_text(value)
+    return type(value) == "string" and value or vim.json.encode(value)
 end
 
 ---@param path string
@@ -204,13 +256,20 @@ local function render_items(nodes, depth, lines, parent_path)
 end
 
 local function render()
+    local keys = vim.tbl_keys(state.env)
+    table.sort(keys)
     local lines = {
         "Help: g?",
         "",
-        "Environment variables (0)",
-        "",
-        "Collection (" .. count_requests({ item = state.items }) .. ")",
+        "Environment variables (" .. #keys .. ")",
     }
+    state.line_env = { [#lines] = "" }
+    for _, key in ipairs(keys) do
+        table.insert(lines, key .. " = " .. env_text(state.env[key]))
+        state.line_env[#lines] = key
+    end
+    table.insert(lines, "")
+    table.insert(lines, "Collection (" .. count_requests({ item = state.items }) .. ")")
     state.line_nodes = {}
     state.line_paths = {}
     state.line_lists = {}
@@ -636,7 +695,123 @@ local function toggle()
     render()
 end
 
+--- Split above the panel for an edit buffer; closing it returns to the panel.
+local function open_edit_window()
+    vim.cmd("aboveleft split")
+
+    local edit_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_create_autocmd("WinClosed", {
+        pattern = tostring(edit_win),
+        once = true,
+        callback = function()
+            -- Only move focus if the user was in the edit window, not when it is closed from elsewhere
+            if vim.api.nvim_get_current_win() ~= edit_win then
+                return
+            end
+            vim.schedule(function()
+                local panel_win = state.split and state.split.winid
+                if panel_win and vim.api.nvim_win_is_valid(panel_win) then
+                    vim.api.nvim_set_current_win(panel_win)
+                end
+            end)
+        end,
+    })
+end
+
+--- Parse `KEY=value` lines. Blank lines and `#` comments are skipped, and a value
+--- wrapped in matching quotes loses them. A value that reads back as the JSON of a
+--- non-string original keeps that original.
+---@param lines string[]
+---@return table<string, any>|nil values, string|nil err
+local function parse_env_lines(lines)
+    local values = {}
+    for i, line in ipairs(lines) do
+        local text = vim.trim(line)
+        if text ~= "" and text:sub(1, 1) ~= "#" then
+            local key, value = text:match("^([^=%s]+)%s*=%s*(.*)$")
+            if not key then
+                return nil, "line " .. i .. ": expected KEY=value"
+            end
+            if values[key] ~= nil then
+                return nil, "line " .. i .. ": duplicate variable '" .. key .. "'"
+            end
+            local quote = value:sub(1, 1)
+            if #value >= 2 and (quote == '"' or quote == "'") and value:sub(-1) == quote then
+                value = value:sub(2, -2)
+            end
+            local original = state.env[key]
+            if original ~= nil and type(original) ~= "string" and env_text(original) == value then
+                value = original
+            end
+            values[key] = value
+        end
+    end
+    return values, nil
+end
+
+--- Edit the environment variables as `KEY=value` lines, like a `.env` file.
+local function edit_env()
+    local key = state.line_env[vim.api.nvim_win_get_cursor(0)[1]]
+    open_edit_window()
+
+    local bufnr = state.env_buf
+    if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) or not vim.api.nvim_buf_is_loaded(bufnr) then
+        if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+            vim.api.nvim_buf_delete(bufnr, { force = true })
+        end
+        local keys = vim.tbl_keys(state.env)
+        table.sort(keys)
+        local lines = vim.tbl_map(function(k)
+            return k .. "=" .. env_text(state.env[k])
+        end, keys)
+
+        bufnr = vim.api.nvim_create_buf(true, false)
+        vim.api.nvim_buf_set_name(bufnr, "http-nvim-env://" .. vim.fn.fnamemodify(env_path, ":t") .. " (edit)")
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+        vim.bo[bufnr].buftype = "acwrite"
+        vim.bo[bufnr].swapfile = false
+        vim.bo[bufnr].modified = false
+        vim.bo[bufnr].filetype = vim.filetype.match({ filename = ".env" }) or "sh"
+        state.env_buf = bufnr
+
+        vim.api.nvim_create_autocmd("BufWriteCmd", {
+            buffer = bufnr,
+            callback = function()
+                local values, err = parse_env_lines(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
+                if not values then
+                    vim.notify("http-nvim: " .. err, vim.log.levels.ERROR)
+                    return
+                end
+                local previous = state.env
+                state.env = values
+                -- On failure the buffer stays modified so the edit is not silently lost
+                if not write_env() then
+                    state.env = previous
+                    return
+                end
+                vim.bo[bufnr].modified = false
+                if state.split and state.split.bufnr and vim.api.nvim_buf_is_valid(state.split.bufnr) then
+                    render()
+                end
+            end,
+        })
+    end
+    vim.api.nvim_set_current_buf(bufnr)
+
+    -- Land on the variable that was under the cursor in the panel
+    if key and key ~= "" then
+        for i, line in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+            if vim.trim(line):match("^([^=%s]+)") == key then
+                vim.api.nvim_win_set_cursor(0, { i, 0 })
+                break
+            end
+        end
+    end
+end
+
 local edit
+---@type fun(request: PostmanRequest|string)
+local send_request
 
 --- Add a GET request with an empty URL and open it with `e` to fill it in.
 --- `a/b/name` creates the request inside folders `a/b`; a trailing `/` (`a/b/`)
@@ -679,30 +854,16 @@ end
 
 edit = function()
     local line = vim.api.nvim_win_get_cursor(0)[1]
+    if state.line_env[line] then
+        edit_env()
+        return
+    end
     local node = state.line_nodes[line]
     if not node or not node.request then
         return
     end
 
-    vim.cmd("aboveleft split")
-
-    local edit_win = vim.api.nvim_get_current_win()
-    vim.api.nvim_create_autocmd("WinClosed", {
-        pattern = tostring(edit_win),
-        once = true,
-        callback = function()
-            -- Only move focus if the user was in the edit window, not when it is closed from elsewhere
-            if vim.api.nvim_get_current_win() ~= edit_win then
-                return
-            end
-            vim.schedule(function()
-                local panel_win = state.split and state.split.winid
-                if panel_win and vim.api.nvim_win_is_valid(panel_win) then
-                    vim.api.nvim_set_current_win(panel_win)
-                end
-            end)
-        end,
-    })
+    open_edit_window()
 
     local name = "http-nvim://" .. state.line_paths[line] .. " (edit)"
     local bufnr = state.edit_bufs[node]
@@ -723,6 +884,16 @@ edit = function()
     vim.bo[bufnr].filetype = "http"
     vim.api.nvim_set_current_buf(bufnr)
     state.edit_bufs[node] = bufnr
+
+    -- Send what the buffer holds now, saved or not
+    vim.keymap.set("n", "<leader>hr", function()
+        local request, err = jetbrains.from_lines(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), node.request)
+        if not request then
+            vim.notify("http-nvim: " .. err, vim.log.levels.ERROR)
+            return
+        end
+        send_request(request)
+    end, { buffer = bufnr })
 
     vim.api.nvim_create_autocmd("BufWriteCmd", {
         buffer = bufnr,
@@ -758,11 +929,218 @@ edit = function()
     })
 end
 
+--- Floating layout with two stacked boxes: 10% on top, 90% below.
+--- Replace every `{{key}}` with its environment value; unknown keys are left as is.
+---@param text string
+---@return string
+local function expand_env(text)
+    return (text:gsub("{{%s*([^{}%s]+)%s*}}", function(key)
+        local value = state.env[key]
+        if value == nil then
+            return nil
+        end
+        return env_text(value)
+    end))
+end
+
+--- curl arguments for a request, with `{{key}}` replaced from the environment.
+--- Only a raw body is sent; other body modes are skipped.
+---@param request PostmanRequest|string
+---@return string[] args, string method, string url
+local function curl_args(request)
+    local method = type(request) == "table" and request.method or "GET"
+    -- Postman URLs may hold spaces and `[]` (e.g. `?q=["a", "b"]`): encode the spaces, and
+    -- `--globoff` stops curl reading `[...]` as a range
+    local url = expand_env(jetbrains.url_of(request)):gsub(" ", "%%20")
+    -- The status code goes on a last line of its own, after the body
+    local args = {
+        "curl", "--silent", "--show-error", "--verbose", "--globoff",
+        "--request", method, "--write-out", "\n%{http_code}",
+    }
+    if type(request) == "table" then
+        for _, header in ipairs(request.header or {}) do
+            if not header.disabled then
+                table.insert(args, "--header")
+                table.insert(args, expand_env(header.key) .. ": " .. expand_env(header.value or ""))
+            end
+        end
+        local body = request.body
+        if body and body.mode == "raw" and body.raw and body.raw ~= "" then
+            table.insert(args, "--data-binary")
+            table.insert(args, expand_env(body.raw))
+        end
+    end
+    table.insert(args, "--")
+    table.insert(args, url)
+    return args, method, url
+end
+
+--- Split curl's `--verbose` stderr into the request and response headers (`> ` and
+--- `< ` lines, a blank line between them) and the other lines, e.g. its error message.
+--- Connection details (`* ` lines) and curl's `Note:` hints are dropped.
+---@param stderr string
+---@return string[] headers, string[] others
+local function split_verbose(stderr)
+    local headers, others = {}, {}
+    local last
+    for _, line in ipairs(vim.split(stderr, "\n", { plain = true })) do
+        line = line:gsub("\r$", "")
+        local prefix = line:sub(1, 2)
+        if line == "> " or line == "< " then
+            -- Blank line ending the headers
+        elseif prefix == "> " or prefix == "< " then
+            if last and last ~= prefix then
+                table.insert(headers, "")
+            end
+            last = prefix
+            table.insert(headers, line)
+        elseif line:sub(1, 1) ~= "*" and line:sub(1, 5) ~= "Note:" and line ~= "" then
+            table.insert(others, line)
+        end
+    end
+    return headers, others
+end
+
+--- Does nothing once the box is closed: nui clears `bufnr` on unmount.
+---@param bufnr integer|nil
+---@param lines string[]
+local function set_readonly_lines(bufnr, lines)
+    if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+        return
+    end
+    vim.bo[bufnr].readonly = false
+    vim.bo[bufnr].modifiable = true
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+    vim.bo[bufnr].modifiable = false
+    vim.bo[bufnr].readonly = true
+end
+
+---@class ResponseBoxes
+---@field header NuiPopup Method, URL and status
+---@field content NuiPopup The response body, or curl's error
+---@field sidebar_right NuiPopup Request and response headers
+
+--- What a sent request shows, kept so `<leader>hp` can show it again.
+---@class ResponseView
+---@field request PostmanRequest|string The request as sent, before `{{key}}` replacement
+---@field request_line string
+---@field status string
+---@field content string[]
+---@field content_filetype string
+---@field sidebar_right string[]
+---@field boxes ResponseBoxes[] Open layouts showing this view, filled in when the response arrives
+
+--- Floating layout: a header box on top, the content box below on the left with
+--- a sidebar on its right. `q` in any box closes it.
+---@return ResponseBoxes
+local function open_response_layout()
+    local buf_options = { modifiable = false, readonly = true }
+    -- Padding left and right only: 2 rows above and below would hide the short header box
+    local border = { style = "rounded", padding = { 0, 1 } }
+    local header = Popup({
+        border = border,
+        buf_options = buf_options
+    })
+    local content = Popup({ border = border, enter = true, buf_options = buf_options })
+    -- Header lines are long for a narrow box: wrap them
+    local sidebar_right = Popup({ border = border, buf_options = buf_options, win_options = { wrap = true } })
+
+    local layout = Layout(
+        {
+            relative = "editor",
+            position = "50%",
+            size = { width = "80%", height = "80%" },
+        },
+        Layout.Box({
+            Layout.Box(header, { size = "10%" }),
+            Layout.Box({
+                Layout.Box(content, { size = "70%" }),
+                Layout.Box(sidebar_right, { size = "30%" }),
+            }, { dir = "row", size = "90%" }),
+        }, { dir = "col" })
+    )
+
+    layout:mount()
+
+    for _, popup in ipairs({ header, content, sidebar_right }) do
+        vim.keymap.set("n", "q", function()
+            layout:unmount()
+        end, { buffer = popup.bufnr })
+    end
+
+    return { header = header, content = content, sidebar_right = sidebar_right }
+end
+
+---@param view ResponseView
+local function show_view(view)
+    for _, boxes in ipairs(view.boxes) do
+        set_readonly_lines(boxes.header.bufnr, { view.request_line, view.status })
+        set_readonly_lines(boxes.content.bufnr, view.content)
+        set_readonly_lines(boxes.sidebar_right.bufnr, view.sidebar_right)
+        local bufnr = boxes.content.bufnr
+        if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+            vim.bo[bufnr].filetype = view.content_filetype
+        end
+    end
+end
+
+--- Send a request with curl and show it in a floating layout:
+--- method, URL and status on top, the response below.
+send_request = function(request)
+    local args, method, url = curl_args(request)
+    ---@type ResponseView
+    local view = {
+        request = request,
+        request_line = method .. " " .. url,
+        status = "Sending...",
+        content = {},
+        content_filetype = "",
+        sidebar_right = {},
+        boxes = { open_response_layout() },
+    }
+    state.last_view = view
+    show_view(view)
+
+    local started = vim.uv.hrtime()
+    vim.system(args, { text = true }, vim.schedule_wrap(function(result)
+        local elapsed = string.format("%d ms", (vim.uv.hrtime() - started) / 1e6)
+        local headers, others = split_verbose(result.stderr or "")
+        view.sidebar_right = headers
+        if result.code ~= 0 then
+            view.status = "curl failed (exit " .. result.code .. ") " .. elapsed
+            view.content = others
+            show_view(view)
+            return
+        end
+        local output = result.stdout or ""
+        local response, status = output:match("^(.*)\n(%d+)$")
+        response = response or output
+        view.status = "HTTP " .. (status or "?") .. " " .. elapsed
+
+        local ok, decoded = pcall(vim.json.decode, response)
+        if ok and type(decoded) == "table" then
+            response = vim.json.encode(decoded, { indent = "  ", sort_keys = true })
+            view.content_filetype = "json"
+        end
+        view.content = vim.split((response:gsub("\r\n", "\n")), "\n", { plain = true })
+        show_view(view)
+    end))
+end
+
+--- Send the request under the cursor in the panel.
+local function make_request()
+    local node = state.line_nodes[vim.api.nvim_win_get_cursor(0)[1]]
+    if node and node.request then
+        send_request(node.request)
+    end
+end
+
 M.open = function()
     if not state.collection then
         state.collection = load_collection(collection_path)
         state.items = state.collection.item
         state.deleted = load_deleted()
+        state.env, state.env_file = load_env(env_path)
     end
 
     state.split = Split({
@@ -817,9 +1195,35 @@ M.open = function()
     vim.keymap.set("n", "]m", function() move_sibling(1) end, { buffer = state.split.bufnr })
     vim.keymap.set("n", "[m", function() move_sibling(-1) end, { buffer = state.split.bufnr })
     vim.keymap.set("n", "e", edit, { buffer = state.split.bufnr })
+    vim.keymap.set("n", "<leader>hr", make_request, { buffer = state.split.bufnr })
     vim.keymap.set("n", "r", rename_item, { buffer = state.split.bufnr })
     vim.keymap.set("n", "D", delete_item, { buffer = state.split.bufnr })
     vim.keymap.set("n", "u", undo_delete, { buffer = state.split.bufnr })
+end
+
+--- Show the last request and its response again, without sending it.
+M.preview_last = function()
+    local view = state.last_view
+    if not view then
+        vim.notify("http-nvim: no request sent yet")
+        return
+    end
+    -- Layouts closed since are dropped; the new one also gets the response if it is still on its way
+    view.boxes = vim.tbl_filter(function(boxes)
+        local bufnr = boxes.content.bufnr
+        return bufnr ~= nil and vim.api.nvim_buf_is_valid(bufnr)
+    end, view.boxes)
+    table.insert(view.boxes, open_response_layout())
+    show_view(view)
+end
+
+--- Send the last request again, with the current environment values.
+M.run_last = function()
+    if not state.last_view then
+        vim.notify("http-nvim: no request sent yet")
+        return
+    end
+    send_request(state.last_view.request)
 end
 
 M.setup = function(opts)

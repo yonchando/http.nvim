@@ -20,7 +20,7 @@ local fields_source = [[
 
 ---@param request PostmanRequest|string
 ---@return string
-local function url_of(request)
+M.url_of = function(request)
     local url = type(request) == "table" and request.url or request
     if type(url) == "table" then
         return url.raw or ""
@@ -35,7 +35,7 @@ M.to_lines = function(name, request)
     local method = type(request) == "table" and request.method or "GET"
     local lines = {
         "### " .. name,
-        method .. " " .. url_of(request),
+        method .. " " .. M.url_of(request),
     }
 
     if type(request) ~= "table" then
@@ -140,7 +140,7 @@ M.from_lines = function(lines, original)
     local request = type(original) == "table" and vim.deepcopy(original) or {}
     request.method = method
     request.header = headers
-    if url ~= url_of(original) then
+    if url ~= M.url_of(original) then
         request.url = { raw = url }
     end
 

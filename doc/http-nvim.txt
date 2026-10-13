@@ -18,6 +18,26 @@ http-nvim helps you do something useful.
 <leader>ho          Open your collection RESTApi. The cursor and scroll
                     position are kept from the last time the panel was
                     closed.
+<leader>hp          Show the last request sent and its response again,
+                    from anywhere, without sending it. If the response
+                    is still on its way, it fills in when it arrives.
+<leader>hl          Send the last request again, from anywhere. Its
+                    `{{key}}` values are read from the environment as
+                    it is now.
+<leader>hr          With the cursor on a request, send it with curl and
+                    show it in a floating layout. The top box shows the
+                    method, URL and status code with the time taken.
+                    Below it, the left box (70% of the width) shows the
+                    response, pretty-printed when it is JSON, or curl's
+                    error; the right box (30%) shows the request and
+                    response headers from curl's verbose output.
+                    Every `{{key}}` in the URL, headers and raw body is
+                    replaced with the environment variable `key`;
+                    unknown keys are left as is. Disabled headers and
+                    non-raw bodies are not sent. Press q in any box to
+                    close the layout. All boxes are read-only.
+                    Also works in an edit buffer opened with |e|: it
+                    sends the buffer as it is now, saved or not.
 <CR> or =           Expand or collapse the collection or folder under the
                     cursor.
 e                   Edit the request under the cursor in JetBrains HTTP
@@ -28,6 +48,12 @@ e                   Edit the request under the cursor in JetBrains HTTP
                     first `### name` section is kept; other sections are
                     removed from the buffer. Changing the `### name` line
                     renames the request.
+                    On the environment variables, edit them all as
+                    `KEY=value` lines, like a `.env` file. Blank lines
+                    and `#` comments are skipped, and quotes around a
+                    value are removed. |:w| rewrites the environment
+                    JSON file; a line without `=` or a repeated name
+                    is an error and nothing is saved.
 r                   Rename the request or folder under the cursor. Open
                     edit buffers follow the new name.
 a                   Add a request or folder: inside the folder under the
