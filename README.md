@@ -135,3 +135,13 @@ Press `e` on the environment variables in the panel to edit them as `KEY=value` 
 | `<C-l>` / `<C-h>` | `focus_headers` / `focus_response` | Switch between the response and headers |
 
 See `:help http-nvim` for details.
+
+## Roadmap
+
+- [x] List collections and environments from Postman
+- [x] Add new requests and folders
+- [x] Send a request and show the result
+- [ ] Read the response in `.http` and set environment variables from it
+- [ ] Support HTML and other content types in the response
+- [ ] Support cookie sessions
+- [ ] Support WebSocket requests
