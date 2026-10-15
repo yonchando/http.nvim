@@ -1,8 +1,10 @@
 --- A built-in language server, running inside Neovim, for request edit buffers.
 --- It completes `{{key}}` environment variables, methods, header names and
---- values, and the response handler API in `> {% %}`, and shows the value of a
+--- values, cookie names from the collection's jar (in a `Cookie:` header and
+--- `response.cookiesByName("")`), and the response handler API in `> {% %}`, and shows the value of a
 --- `{{key}}` on hover. It reads the buffer
 --- straight from Neovim, so it doesn't track `didOpen`/`didChange`.
+local cookies = require("http-nvim.cookies")
 local state = require("http-nvim.state")
 
 local kind = vim.lsp.protocol.CompletionItemKind
@@ -40,24 +42,17 @@ local headers = {
     ["X-Requested-With"] = { "XMLHttpRequest" },
 }
 
--- What `handler.lua` understands in a response handler script
+-- What `handler.lua` understands in a response handler script: the JetBrains API only
 local script_items = {
-    { "request.variables.set", 'request.variables.set("${1:key}", ${0})' },
     { "client.global.set", 'client.global.set("${1:key}", ${0})' },
-    { "pm.environment.set", 'pm.environment.set("${1:key}", ${0})' },
-    { "pm.globals.set", 'pm.globals.set("${1:key}", ${0})' },
-    { "pm.collectionVariables.set", 'pm.collectionVariables.set("${1:key}", ${0})' },
-    { "pm.variables.set", 'pm.variables.set("${1:key}", ${0})' },
-    { "request.variables.secret", 'request.variables.secret("${1:key}", ${0})' },
     { "client.global.secret", 'client.global.secret("${1:key}", ${0})' },
-    { "pm.environment.secret", 'pm.environment.secret("${1:key}", ${0})' },
     { "response.body", "response.body" },
     { "response.status", "response.status" },
     { "response.headers.valueOf", 'response.headers.valueOf("${1:Header}")' },
-    { "pm.response.json", "pm.response.json()" },
-    { "pm.response.text", "pm.response.text()" },
-    { "pm.response.code", "pm.response.code" },
-    { "pm.response.headers.get", 'pm.response.headers.get("${1:Header}")' },
+    { "response.cookies", "response.cookies()" },
+    { "response.cookiesByName", 'response.cookiesByName("${1:name}")' },
+    { "decodeURIComponent", "decodeURIComponent(${1})" },
+    { "encodeURIComponent", "encodeURIComponent(${1})" },
 }
 
 ---@param line integer 0-based
@@ -91,6 +86,23 @@ local function env_items(row, from, col, closed)
                 kind = kind.Variable,
                 detail = shown_value(var),
                 textEdit = edit(row, from, col, var.key .. (closed and "" or "}}")),
+            })
+        end
+    end
+    return items
+end
+
+--- Cookies of the jar, one per name; `with_value` inserts `name=value`, for a `Cookie:` header.
+local function cookie_items(row, from, col, with_value)
+    local items, seen = {}, {}
+    for _, cookie in ipairs(cookies.list()) do
+        if not seen[cookie.name] then
+            seen[cookie.name] = true
+            table.insert(items, {
+                label = cookie.name,
+                kind = kind.Variable,
+                detail = cookies.mask(cookie.value) .. "  " .. cookie.domain .. cookie.path,
+                textEdit = edit(row, from, col, with_value and cookie.name .. "=" .. cookie.value or cookie.name),
             })
         end
     end
@@ -169,6 +181,11 @@ local function complete(params)
     end
 
     if in_script(lines, row) then
+        local cookie = before:match("response%.cookiesByName%(%s*[\"']([^\"']*)$")
+            or before:match("response%.cookies%(%s*%)%.([%w_]*)$")
+        if cookie then
+            return cookie_items(row0, col - #cookie, col, false)
+        end
         local word = before:match("[%w_%.]*$")
         return vim.tbl_map(function(item)
             return {
@@ -200,6 +217,17 @@ local function complete(params)
     end
 
     local name, gap, value = before:match("^([%w%-]+)(:%s*)(.*)$")
+    if name and name:lower() == "cookie" then
+        -- After `Cookie:` or a `; ` between cookies
+        local word = value:match("[^;%s]*$")
+        local items = cookie_items(row0, col - #word, col, true)
+        if gap == ":" then
+            for _, item in ipairs(items) do
+                item.textEdit.newText = " " .. item.textEdit.newText
+            end
+        end
+        return items
+    end
     if name then
         local values = {}
         for header, list in pairs(headers) do
@@ -278,7 +306,7 @@ local function server(dispatchers)
                 callback(nil, {
                     capabilities = {
                         positionEncoding = "utf-8",
-                        completionProvider = { triggerCharacters = { "{", ":", " ", "." } },
+                        completionProvider = { triggerCharacters = { "{", ":", " ", ".", '"' } },
                         hoverProvider = true,
                     },
                     serverInfo = { name = "http-nvim" },

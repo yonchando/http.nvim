@@ -28,7 +28,10 @@ browse, edit and send them without leaving Neovim.
 
 Each collection lives in its own folder, holding `collection.json` (a
 Postman v2.1 collection) and `env.json` (a Postman environment), so both
-can be imported into Postman, and Postman exports can be used here.
+can be imported into Postman, and Postman exports can be used here. Next to
+them, `cookie` is the collection's curl cookie jar: cookies set by
+responses are saved there and sent with its next requests, see
+|:HttpCookies|.
 
 Requirements:
 - Neovim with the tree-sitter `http` parser (`:TSInstall http`)
@@ -73,7 +76,10 @@ lsp                 Completion in request edit buffers, from a language
                     server built into the plugin (no install needed).
                     It completes `{{key}}` with the environment
                     variables, the method, header names and common
-                    values, and the response handler API inside
+                    values, cookie names from the collection's jar (as
+                    `name=value` in a `Cookie:` header, and inside
+                    `response.cookiesByName("")` or after
+                    `response.cookies().`), and the response handler API inside
                     `> {% %}`. |K| (|vim.lsp.buf.hover()|) on a `{{key}}`
                     shows its value, masked when secret, or that it
                     is disabled or not set. Completion plugins such as blink.cmp or
@@ -105,6 +111,25 @@ lsp                 Completion in request edit buffers, from a language
                     `env.json`. Files that already exist are left as
                     they are. If no collection is chosen yet, {name}
                     becomes the chosen one.
+
+The cookie commands work on the jar of the chosen collection,
+`collection_dir/{name}/cookie` (curl's Netscape cookie file).
+
+:HttpCookies                                                *:HttpCookies*
+                    Show the cookies in a floating window: name, domain
+                    and path, expiry and flags. Values are masked to
+                    their first 4 characters (`abc1…`). `q` closes it.
+
+:HttpCookiesClear                                      *:HttpCookiesClear*
+                    Delete the jar, like logging out of everything in
+                    this collection. Other collections keep theirs.
+
+:HttpCookiesDelete {name}                             *:HttpCookiesDelete*
+                    Remove the cookies named {name}, for every domain.
+                    {name} completes with the cookies in the jar.
+
+:HttpCookiesEdit                                        *:HttpCookiesEdit*
+                    Open the jar file in a buffer, to edit it by hand.
 
 ==============================================================================
 4. KEYMAPS                                             *http-nvim-keymaps*
@@ -213,7 +238,7 @@ updated if it exists, and `env.json` is saved: >http
     { "user": "me" }
 
     > {%
-      request.variables.set("token", response.body.data.token)
+      client.global.set("token", response.body.data.token)
       client.global.set("auth", "Bearer " + response.body.data.token)
     %}
 <
@@ -221,10 +246,12 @@ A one-line `> {% ... %}` works too. The script is saved with |:w| as the
 request's Postman `test` event, and runs when sending from the panel, the
 edit buffer or with `<leader>hre`.
 
-There is no JavaScript engine: only `set("key", value)` calls on
-`request.variables`, `client.global`, `pm.environment`, `pm.globals`,
-`pm.collectionVariables` and `pm.variables` are read, the rest is ignored.
-`secret("key", value)` on the same objects sets the variable as a secret
+Only the JetBrains HTTP Client API is supported, and there is no
+JavaScript engine: only `client.global.set("key", value)` and
+`client.global.secret("key", value)` calls are read, the rest is ignored
+(including `request.variables`, which in JetBrains only last for one
+request). Postman's `pm.*` API (e.g. `pm.environment.set`) is not
+supported. `secret` sets the variable as a secret
 one (Postman type `secret`, masked in the panel); `set` keeps the type of
 an existing variable.
 The value is one or more terms joined with `+`:
@@ -232,11 +259,18 @@ The value is one or more terms joined with `+`:
   `"text"`, `'text'`, `42`              A literal
   `response.body.a[0]["b"]`         The JSON body, through `.key`, `[0]`
                                     and `["key"]`; `.length` of a list
-  `pm.response.json().a`            Same as `response.body.a`
-  `pm.response.text()`              The body as text
-  `response.status`                 The status code, also `pm.response.code`
-  `response.headers.valueOf("X")`   A response header, also
-                                    `pm.response.headers.get("X")`
+  `response.status`                 The status code
+  `response.headers.valueOf("X")`   A response header
+  `response.cookies()`              The cookies the response set
+                                    (`Set-Cookie`, redirects included),
+                                    as an object of name to value;
+                                    `response.cookies().sid` reads one
+  `response.cookiesByName("sid")`   The value of the cookie `sid` the
+                                    response set
+  `decodeURIComponent(value)`       The value URL-decoded (`%3D` to `=`),
+                                    e.g. Laravel's `XSRF-TOKEN` cookie
+  `encodeURIComponent(value)`       The value URL-encoded, as JavaScript
+                                    does
 
 A single term that is an object or list is stored as is; anything else is
 stored as text. A value that can't be read (e.g. a missing key) is reported

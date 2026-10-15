@@ -1,4 +1,5 @@
 local collections = require("http-nvim.collections")
+local cookies = require("http-nvim.cookies")
 local keymaps = require("http-nvim.keymaps")
 local panel = require("http-nvim.panel")
 local request = require("http-nvim.request")
@@ -25,6 +26,21 @@ M.preview_last = request.preview_last
 
 --- Send the last request again, with the current environment values.
 M.run_last = request.run_last
+
+--- Show the selected collection's cookies in a floating window, values masked.
+M.show_cookies = cookies.show
+
+--- Delete the selected collection's cookie jar.
+M.clear_cookies = cookies.clear
+
+--- Remove the cookies named `name` from the selected collection's jar.
+---@param name string
+M.delete_cookie = function(name)
+    cookies.delete(name)
+end
+
+--- Open the selected collection's cookie jar file.
+M.edit_cookies = cookies.edit
 
 --- Set the global keymaps (`open`, `preview_last`, `run_last`). Called by the plugin
 --- file, and again by `setup()` so that keymaps given there replace them.

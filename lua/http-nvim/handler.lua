@@ -1,34 +1,29 @@
---- Response handler scripts (`> {% ... %}`): there is no JavaScript engine, so
---- only the calls that set a variable are read, and their values are taken from
---- the response:
+--- Response handler scripts (`> {% ... %}`), with the JetBrains HTTP Client API
+--- only: there is no JavaScript engine, so only the calls that set a variable are
+--- read, and their values are taken from the response:
 ---
----   request.variables.set("token", response.body.data.token)
+---   client.global.set("token", response.body.data.token)
 ---   client.global.set("auth", "Bearer " + response.body.token)
----   pm.environment.set("id", pm.response.json().items[0].id)
----   request.variables.secret("password", response.body.password)
+---   client.global.secret("password", response.body.password)
 ---
 --- `secret(key, value)` works like `set` and also makes the variable a secret
 --- one (Postman type `secret`), masked in the panel; `set` keeps the type.
---- A value is `+`-joined terms: string or number literals, `response.body` (or
---- `pm.response.json()`) followed by `.key`, `["key"]` and `[0]` accessors,
---- `response.status`, `response.headers.valueOf("Name")`, or `pm.response.text()`.
+--- A value is `+`-joined terms: string or number literals, `response.body`
+--- followed by `.key`, `["key"]` and `[0]` accessors, `response.status`,
+--- `response.headers.valueOf("Name")`, `response.cookies()` (an object of the
+--- cookies the response set, accessors allowed) or `response.cookiesByName("name")`.
+--- `decodeURIComponent(value)` and `encodeURIComponent(value)` wrap any value.
 --- Each variable is set in the environment and saved.
 
 ---@class HandlerResponse
 ---@field status integer|nil
 ---@field headers table<string, string> Keyed by lowercase name
+---@field cookies table<string, string> Cookies set by `Set-Cookie`, keyed by name
 ---@field body any Decoded JSON, or the text when it is not JSON
 ---@field text string
 
--- Objects whose `set(key, value)` and `secret(key, value)` set an environment variable
-local setters = {
-    ["request.variables"] = true,
-    ["client.global"] = true,
-    ["pm.environment"] = true,
-    ["pm.globals"] = true,
-    ["pm.collectionVariables"] = true,
-    ["pm.variables"] = true,
-}
+-- The object whose `set(key, value)` and `secret(key, value)` set an environment variable
+local setter = "client.global"
 
 local escapes = { n = "\n", t = "\t", r = "\r" }
 
@@ -88,7 +83,7 @@ local function split_top(s, i, separator)
     return parts, i + 1
 end
 
---- Every `<setter>.set("key", expression)` and `<setter>.secret(...)` call in the script.
+--- Every `client.global.set("key", expression)` and `client.global.secret(...)` call in the script.
 ---@param script string[]
 ---@return { key: string, expr: string, secret: boolean }[] calls, string[] errors
 local function parse_set_calls(script)
@@ -100,7 +95,7 @@ local function parse_set_calls(script)
         if not start then
             break
         end
-        if not (setters[owner] and (method == "set" or method == "secret")) then
+        if not (owner == setter and (method == "set" or method == "secret")) then
             -- Not a setter: look inside its arguments too
             pos = finish + 1
         else
@@ -156,10 +151,33 @@ local function access(value, chain)
     return value, nil
 end
 
+local eval
+
+-- JavaScript's `encodeURIComponent` keeps these as is
+local function encode_uri_component(text)
+    return (text:gsub("[^%w%-_%.!~%*'%(%)]", function(c)
+        return ("%%%02X"):format(c:byte())
+    end))
+end
+
+-- Functions that take one value and return text
+local functions = {
+    decodeURIComponent = vim.uri_decode,
+    encodeURIComponent = encode_uri_component,
+}
+
 ---@param term string
 ---@param response HandlerResponse
 ---@return any|nil value, string|nil err
 local function eval_term(term, response)
+    local fn, arg = term:match("^(%a+)%((.*)%)$")
+    if fn and functions[fn] then
+        local value, err = eval(arg, response)
+        if value == nil then
+            return nil, err
+        end
+        return functions[fn](type(value) == "table" and vim.json.encode(value) or value), nil
+    end
     local quote = term:sub(1, 1)
     if quote == '"' or quote == "'" or quote == "`" then
         local value, next = read_string(term, 1)
@@ -170,16 +188,10 @@ local function eval_term(term, response)
     if term:match("^%-?%d+%.?%d*$") then
         return tonumber(term), nil
     end
-    if term == "response.status" or term == "pm.response.code" then
+    if term == "response.status" then
         return response.status, nil
     end
-    if term == "pm.response.text()" then
-        return response.text, nil
-    end
     local _, name = term:match("^response%.headers%.valueOf%(%s*([\"'])(.-)%1%s*%)$")
-    if not name then
-        _, name = term:match("^pm%.response%.headers%.get%(%s*([\"'])(.-)%1%s*%)$")
-    end
     if name then
         local value = response.headers[name:lower()]
         if not value then
@@ -187,9 +199,21 @@ local function eval_term(term, response)
         end
         return value, nil
     end
-    local chain = term:match("^response%.body(.*)$") or term:match("^pm%.response%.json%(%)(.*)$")
+    local chain = term:match("^response%.body(.*)$")
     if chain then
         return access(response.body, chain)
+    end
+    chain = term:match("^response%.cookies%(%s*%)(.*)$")
+    if chain then
+        return access(response.cookies, chain)
+    end
+    _, name = term:match("^response%.cookiesByName%(%s*([\"'])(.-)%1%s*%)$")
+    if name then
+        local value = response.cookies[name]
+        if not value then
+            return nil, "no cookie '" .. name .. "'"
+        end
+        return value, nil
     end
     return nil, "unsupported value '" .. term .. "'"
 end
@@ -198,7 +222,7 @@ end
 ---@param expr string
 ---@param response HandlerResponse
 ---@return any|nil value, string|nil err
-local function eval(expr, response)
+eval = function(expr, response)
     local terms = split_top(expr, 1, "+")
     local values = {}
     for _, term in ipairs(terms) do
@@ -231,6 +255,23 @@ local function parse_headers(header_lines)
     return headers
 end
 
+--- Cookies set by curl's `--verbose` `< Set-Cookie: name=value; ...` lines, over
+--- every response (redirects too), a later one winning.
+---@param header_lines string[]
+---@return table<string, string>
+local function parse_cookies(header_lines)
+    local cookies = vim.empty_dict()
+    for _, line in ipairs(header_lines) do
+        local cookie = line:match("^< [Ss][Ee][Tt]%-[Cc][Oo][Oo][Kk][Ii][Ee]:%s*(.-)%s*$")
+        local name, value = (cookie or ""):match("^([^=;%s]+)%s*=%s*([^;]*)")
+        if name then
+            value = vim.trim(value)
+            cookies[name] = value:match('^"(.*)"$') or value
+        end
+    end
+    return cookies
+end
+
 --- Run the script's `set` calls against the response and save the variables they set.
 ---@param script string[]
 ---@param response HandlerResponse
@@ -258,5 +299,6 @@ end
 
 return {
     parse_headers = parse_headers,
+    parse_cookies = parse_cookies,
     run = run,
 }

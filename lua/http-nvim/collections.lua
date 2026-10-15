@@ -58,6 +58,7 @@ local function select(name)
     state.selected = name
     state.collection_path = dir .. "/collection.json"
     state.env_path = dir .. "/env.json"
+    state.cookie_path = dir .. "/cookie"
     -- Load the new files on the next `open()`
     state.collection = nil
     return true

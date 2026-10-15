@@ -3,6 +3,7 @@
 ---@field selected string|nil Name of the chosen collection, a folder in `collection_dir`
 ---@field collection_path string|nil `collection.json` of the selected collection
 ---@field env_path string|nil `env.json` of the selected collection
+---@field cookie_path string|nil `cookie` of the selected collection: curl's cookie jar
 ---@field split NuiSplit|nil
 ---@field collection PostmanCollection|nil The loaded collection, written back to `collection_path` on save
 ---@field items PostmanItem[]|nil Top-level items of the loaded collection
@@ -25,6 +26,7 @@ local state = {
     selected = nil,
     collection_path = nil,
     env_path = nil,
+    cookie_path = nil,
     split = nil,
     collection = nil,
     items = nil,

@@ -23,6 +23,30 @@ end, {
     end,
 })
 
+vim.api.nvim_create_user_command("HttpCookies", http.show_cookies, {
+    desc = "Show the cookies of the selected collection",
+})
+
+vim.api.nvim_create_user_command("HttpCookiesClear", http.clear_cookies, {
+    desc = "Delete the cookies of the selected collection",
+})
+
+vim.api.nvim_create_user_command("HttpCookiesDelete", function(cmd)
+    http.delete_cookie(cmd.args)
+end, {
+    nargs = 1,
+    desc = "Remove a cookie of the selected collection",
+    complete = function(arglead)
+        return vim.tbl_filter(function(name)
+            return vim.startswith(name, arglead)
+        end, require("http-nvim.cookies").names())
+    end,
+})
+
+vim.api.nvim_create_user_command("HttpCookiesEdit", http.edit_cookies, {
+    desc = "Open the cookie jar of the selected collection",
+})
+
 local http_augroup = vim.api.nvim_create_augroup("http-nvim", {
     clear = true
 })
