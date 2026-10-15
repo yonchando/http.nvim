@@ -5,6 +5,7 @@ local collections = require("http-nvim.collections")
 local config = require("http-nvim.config")
 local edit_mod = require("http-nvim.edit")
 local env = require("http-nvim.env")
+local jetbrains = require("http-nvim.jetbrains")
 local keymaps = require("http-nvim.keymaps")
 local request = require("http-nvim.request")
 local state = require("http-nvim.state")
@@ -56,6 +57,12 @@ local function render_items(nodes, depth, lines, parent_path)
 end
 
 local function render()
+    -- `:bd` on the panel unloads its buffer but keeps it: writing into it would
+    -- load it as a nameless modified buffer, which `:wa` then fails on (E141)
+    local panel_buf = state.split and state.split.bufnr
+    if not panel_buf or not vim.api.nvim_buf_is_loaded(panel_buf) then
+        return
+    end
     local lines = {
         "Help: g?",
         "",
@@ -63,7 +70,7 @@ local function render()
     }
     state.line_env = { [#lines] = "" }
     for _, var in ipairs(state.env) do
-        table.insert(lines, env_line(var, " = "))
+        table.insert(lines, env_line(var, " = ", true))
         state.line_env[#lines] = var.key
     end
     table.insert(lines, "")
@@ -411,7 +418,7 @@ end
 local function make_request()
     local node = state.line_nodes[vim.api.nvim_win_get_cursor(0)[1]]
     if node and node.request then
-        send_request(node.request)
+        send_request(node.request, jetbrains.script_of(node), node)
     end
 end
 
@@ -427,10 +434,22 @@ local function open()
         state.env, state.env_file = load_env(state.env_path)
     end
 
+    -- One panel at a time: keymaps act on `state.split`, so a second one would
+    -- leave the first pointing at whichever was opened last
+    if state.split then
+        local winid = state.split.winid
+        if winid and vim.api.nvim_win_is_valid(winid) then
+            vim.api.nvim_set_current_win(winid)
+            return
+        end
+        -- Closed with `<C-w>c` only hides it: drop its buffer before making a new one
+        state.split:unmount()
+    end
+
     state.split = Split({
         enter = true,
         relative = "editor",
-        size = "40%",
+        size = "50%",
         buf_options = {
             modifiable = false,
             readonly = false

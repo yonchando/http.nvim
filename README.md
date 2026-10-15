@@ -104,7 +104,22 @@ Content-Type: application/json
 }
 ```
 
-Press `e` on the environment variables in the panel to edit them as `KEY=value` lines, like a `.env` file. `# KEY=value` is a disabled variable, which `{{key}}` doesn't use.
+A request can end with a response handler that sets environment variables from the response, saved to `env.json` after each send (see `:h http-nvim-response-handler` for the supported values):
+
+```http
+### login
+POST {{url}}/login
+Content-Type: application/json
+
+{ "user": "me" }
+
+> {%
+  request.variables.set("token", response.body.data.token)
+  client.global.set("auth", "Bearer " + response.body.data.token)
+%}
+```
+
+Press `e` on the environment variables in the panel to edit them as `KEY=value` lines, like a `.env` file. `# KEY=value` is a disabled variable, which `{{key}}` doesn't use. `KEY=value # secret` marks a secret variable (Postman type `secret`), whose value the panel shows as `********`.
 
 ### Commands
 
@@ -141,7 +156,7 @@ See `:help http-nvim` for details.
 - [x] List collections and environments from Postman
 - [x] Add new requests and folders
 - [x] Send a request and show the result
-- [ ] Read the response in `.http` and set environment variables from it
+- [x] Read the response in `.http` and set environment variables from it
 - [ ] Support HTML and other content types in the response
 - [ ] Support cookie sessions
 - [ ] Support WebSocket requests

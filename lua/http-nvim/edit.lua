@@ -84,27 +84,69 @@ local function open_edit_window()
     })
 end
 
+--- A new listed `acwrite` buffer named `name`. A leftover buffer of that name
+--- that isn't a tracked edit buffer is wiped first. Returns nil, after a message,
+--- when the name is taken: setting it would fail and leave a nameless buffer
+--- behind, which `:wa` and `:bd` then trip over.
+---@param name string
+---@param filetype string
+---@return integer|nil
+local function create_edit_buf(name, filetype)
+    local tracked = {}
+    for _, bufnr in pairs(state.edit_bufs) do
+        tracked[bufnr] = true
+    end
+    if state.env_buf then
+        tracked[state.env_buf] = true
+    end
+    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.api.nvim_buf_get_name(bufnr) == name then
+            if tracked[bufnr] then
+                vim.notify("http-nvim: '" .. name .. "' is already open for another request with the same name",
+                    vim.log.levels.ERROR)
+                return nil
+            elseif vim.bo[bufnr].modified then
+                vim.notify("http-nvim: buffer '" .. name .. "' has unsaved changes", vim.log.levels.ERROR)
+                return nil
+            end
+            vim.api.nvim_buf_delete(bufnr, { force = true })
+        end
+    end
+
+    local bufnr = vim.api.nvim_create_buf(true, false)
+    local ok, err = pcall(vim.api.nvim_buf_set_name, bufnr, name)
+    if not ok then
+        vim.api.nvim_buf_delete(bufnr, { force = true })
+        vim.notify("http-nvim: " .. tostring(err), vim.log.levels.ERROR)
+        return nil
+    end
+    vim.bo[bufnr].buftype = "acwrite"
+    vim.bo[bufnr].swapfile = false
+    vim.bo[bufnr].filetype = filetype
+    return bufnr
+end
+
 --- Edit the environment variables as `KEY=value` lines, like a `.env` file.
 local function edit_env()
     local key = state.line_env[vim.api.nvim_win_get_cursor(0)[1]]
-    open_edit_window()
 
     local bufnr = state.env_buf
     if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) or not vim.api.nvim_buf_is_loaded(bufnr) then
         if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
             vim.api.nvim_buf_delete(bufnr, { force = true })
         end
+        state.env_buf = nil
         local lines = vim.tbl_map(function(var)
             return env_line(var, "=")
         end, state.env)
 
-        bufnr = vim.api.nvim_create_buf(true, false)
-        vim.api.nvim_buf_set_name(bufnr, "http-nvim-env://" .. vim.fn.fnamemodify(state.env_path, ":t") .. " (edit)")
+        bufnr = create_edit_buf("http-nvim-env://" .. vim.fn.fnamemodify(state.env_path, ":t") .. " (edit)",
+            vim.filetype.match({ filename = ".env" }) or "sh")
+        if not bufnr then
+            return
+        end
         vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-        vim.bo[bufnr].buftype = "acwrite"
-        vim.bo[bufnr].swapfile = false
         vim.bo[bufnr].modified = false
-        vim.bo[bufnr].filetype = vim.filetype.match({ filename = ".env" }) or "sh"
         state.env_buf = bufnr
 
         vim.api.nvim_create_autocmd("BufWriteCmd", {
@@ -129,6 +171,7 @@ local function edit_env()
             end,
         })
     end
+    open_edit_window()
     vim.api.nvim_set_current_buf(bufnr)
 
     -- Land on the variable that was under the cursor in the panel
@@ -153,43 +196,43 @@ local function edit()
         return
     end
 
-    open_edit_window()
-
     local name = "http-nvim://" .. state.line_paths[line] .. " (edit)"
     local bufnr = state.edit_bufs[node]
     if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
         if vim.api.nvim_buf_is_loaded(bufnr) then
+            open_edit_window()
             vim.api.nvim_set_current_buf(bufnr)
             return
         end
         vim.api.nvim_buf_delete(bufnr, { force = true })
     end
+    state.edit_bufs[node] = nil
 
-    bufnr = vim.api.nvim_create_buf(true, false)
-    vim.api.nvim_buf_set_name(bufnr, name)
-    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, jetbrains.to_lines(node.name, node.request))
-    vim.bo[bufnr].buftype = "acwrite"
-    vim.bo[bufnr].swapfile = false
+    bufnr = create_edit_buf(name, "http")
+    if not bufnr then
+        return
+    end
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, jetbrains.to_lines(node.name, node.request, jetbrains.script_of(node)))
     vim.bo[bufnr].modified = false
-    vim.bo[bufnr].filetype = "http"
+    open_edit_window()
     vim.api.nvim_set_current_buf(bufnr)
     state.edit_bufs[node] = bufnr
 
     -- Send what the buffer holds now, saved or not
     keymaps.map("send", function()
-        local request, err = jetbrains.from_lines(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), node.request)
+        local request, err, _, script = jetbrains.from_lines(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), node.request)
         if not request then
             vim.notify("http-nvim: " .. err, vim.log.levels.ERROR)
             return
         end
-        send_request(request)
+        send_request(request, script, node)
     end, bufnr)
 
     vim.api.nvim_create_autocmd("BufWriteCmd", {
         buffer = bufnr,
         callback = function()
             local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-            local request, err, section = jetbrains.from_lines(lines, node.request)
+            local request, err, section, script = jetbrains.from_lines(lines, node.request)
             if not request or not section then
                 vim.notify("http-nvim: " .. err, vim.log.levels.ERROR)
                 return
@@ -208,6 +251,7 @@ local function edit()
                 pcall(vim.api.nvim_buf_set_name, bufnr, "http-nvim://" .. path .. " (edit)")
             end
             node.request = request
+            jetbrains.set_script(node, script)
             -- On failure the buffer stays modified so the edit is not silently lost
             if write_collection(state.collection_path) then
                 vim.bo[bufnr].modified = false

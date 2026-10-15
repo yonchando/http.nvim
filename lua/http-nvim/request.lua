@@ -3,6 +3,7 @@ local Layout = require("nui.layout")
 local Popup = require("nui.popup")
 local config = require("http-nvim.config")
 local env = require("http-nvim.env")
+local handler = require("http-nvim.handler")
 local jetbrains = require("http-nvim.jetbrains")
 local keymaps = require("http-nvim.keymaps")
 local state = require("http-nvim.state")
@@ -21,6 +22,8 @@ vim.api.nvim_set_hl(0, "httpNvimMethod", { link = "Keyword", default = true })
 --- What a sent request shows, kept so `<leader>hrp` can show it again.
 ---@class ResponseView
 ---@field request PostmanRequest|string The request as sent, before `{{key}}` replacement
+---@field script string[]|nil Response handler script, run on each response
+---@field node PostmanItem|nil The collection item it came from, re-read by `<leader>hre`
 ---@field request_line string
 ---@field status string
 ---@field content string[]
@@ -164,12 +167,18 @@ local function show_view(view)
 end
 
 --- Send a request with curl and show it in a floating layout:
---- method, URL and status on top, the response below.
-local function send_request(request)
+--- method, URL and status on top, the response below. Then run the response
+--- handler script, if any, to set environment variables from the response.
+---@param request PostmanRequest|string
+---@param script string[]|nil
+---@param node PostmanItem|nil The item the request comes from, so `run_last` can read it again
+local function send_request(request, script, node)
     local args, method, url = curl_args(request)
     ---@type ResponseView
     local view = {
         request = request,
+        script = script,
+        node = node,
         request_line = method .. " " .. url,
         status = "Sending...",
         content = {},
@@ -196,6 +205,7 @@ local function send_request(request)
         response = response or output
         view.status = "HTTP " .. (status or "?") .. " " .. elapsed
 
+        local text = response
         local ok, decoded = pcall(vim.json.decode, response)
         if ok and type(decoded) == "table" then
             response = vim.json.encode(decoded, { indent = "  ", sort_keys = true })
@@ -203,6 +213,15 @@ local function send_request(request)
         end
         view.content = vim.split((response:gsub("\r\n", "\n")), "\n", { plain = true })
         show_view(view)
+
+        if script then
+            handler.run(script, {
+                status = tonumber(status),
+                headers = handler.parse_headers(headers),
+                body = ok and decoded or text,
+                text = text,
+            })
+        end
     end))
 end
 
@@ -222,13 +241,31 @@ local function preview_last()
     show_view(view)
 end
 
---- Send the last request again, with the current environment values.
+--- Send the last request again, with the current environment values. The request
+--- is read again from its item: its edit buffer as it is now, saved or not, or
+--- else the item as saved. A request with no item is sent as it was.
 local function run_last()
-    if not state.last_view then
+    local view = state.last_view
+    if not view then
         vim.notify("http-nvim: no request sent yet")
         return
     end
-    send_request(state.last_view.request)
+    local node = view.node
+    if not node or not node.request then
+        send_request(view.request, view.script)
+        return
+    end
+    local bufnr = state.edit_bufs[node]
+    if bufnr and vim.api.nvim_buf_is_loaded(bufnr) then
+        local request, err, _, script = jetbrains.from_lines(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), node.request)
+        if not request then
+            vim.notify("http-nvim: " .. err, vim.log.levels.ERROR)
+            return
+        end
+        send_request(request, script, node)
+        return
+    end
+    send_request(node.request, jetbrains.script_of(node), node)
 end
 
 return {

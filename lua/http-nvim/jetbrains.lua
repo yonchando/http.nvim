@@ -3,9 +3,14 @@
 --   ### name
 --   POST {{url}}/v1/login
 --   Content-Type: application/json
---   # X-Disabled: header
+--   # or // X-Disabled: header
+--   // comment
 --
 --   { "body": true }
+--
+--   > {%
+--     client.global.set("token", response.body.token)
+--   %}
 
 local M = {}
 
@@ -16,7 +21,39 @@ local fields_source = [[
 (request header: (header) @header)
 (request (comment) @comment)
 (request body: (_) @body)
+(request (res_handler_script) @handler)
 ]]
+
+--- Lines of the item's response handler script: the `exec` of its Postman `test` event.
+---@param item PostmanItem
+---@return string[]|nil
+M.script_of = function(item)
+    for _, event in ipairs(item.event or {}) do
+        if event.listen == "test" and event.script then
+            local exec = event.script.exec
+            if type(exec) == "string" then
+                exec = vim.split(exec, "\n", { plain = true })
+            end
+            if exec and #exec > 0 then
+                return exec
+            end
+        end
+    end
+end
+
+--- Store the response handler script as the item's Postman `test` event, or
+--- remove that event when `script` is nil. Other events are kept.
+---@param item PostmanItem
+---@param script string[]|nil
+M.set_script = function(item, script)
+    local events = vim.tbl_filter(function(event)
+        return event.listen ~= "test"
+    end, item.event or {})
+    if script then
+        table.insert(events, { listen = "test", script = { type = "text/javascript", exec = script } })
+    end
+    item.event = #events > 0 and events or nil
+end
 
 ---@param request PostmanRequest|string
 ---@return string
@@ -30,32 +67,38 @@ end
 
 ---@param name string
 ---@param request PostmanRequest|string
+---@param script string[]|nil Response handler script, written as `> {% ... %}`
 ---@return string[]
-M.to_lines = function(name, request)
+M.to_lines = function(name, request, script)
     local method = type(request) == "table" and request.method or "GET"
     local lines = {
         "### " .. name,
         method .. " " .. M.url_of(request),
     }
 
-    if type(request) ~= "table" then
-        return lines
-    end
-
-    for _, header in ipairs(request.header or {}) do
-        local prefix = header.disabled and "# " or ""
-        table.insert(lines, prefix .. header.key .. ": " .. (header.value or ""))
-    end
-
-    local body = request.body
-    if body and body.mode == "raw" and body.raw and body.raw ~= "" then
-        table.insert(lines, "")
-        for _, line in ipairs(vim.split((body.raw:gsub("\r\n", "\n")), "\n", { plain = true })) do
-            table.insert(lines, line)
+    if type(request) == "table" then
+        for _, header in ipairs(request.header or {}) do
+            local prefix = header.disabled and "# " or ""
+            table.insert(lines, prefix .. header.key .. ": " .. (header.value or ""))
         end
-    elseif body and body.mode and body.mode ~= "raw" then
+
+        local body = request.body
+        if body and body.mode == "raw" and body.raw and body.raw ~= "" then
+            table.insert(lines, "")
+            for _, line in ipairs(vim.split((body.raw:gsub("\r\n", "\n")), "\n", { plain = true })) do
+                table.insert(lines, line)
+            end
+        elseif body and body.mode and body.mode ~= "raw" then
+            table.insert(lines, "")
+            table.insert(lines, "# body mode '" .. body.mode .. "' is not editable here and is kept as is")
+        end
+    end
+
+    if script then
         table.insert(lines, "")
-        table.insert(lines, "# body mode '" .. body.mode .. "' is not editable here and is kept as is")
+        table.insert(lines, "> {%")
+        vim.list_extend(lines, script)
+        table.insert(lines, "%}")
     end
 
     return lines
@@ -66,7 +109,8 @@ end
 --- Only the first `### name` section is read; other sections are ignored.
 ---@param lines string[]
 ---@param original PostmanRequest|string
----@return PostmanRequest|nil, string|nil, { name: string, start_row: integer, end_row: integer }|nil Name and 0-based, end-exclusive line range of the section used
+--- The response handler script (`> {% ... %}`) comes back as its own lines.
+---@return PostmanRequest|nil, string|nil, { name: string, start_row: integer, end_row: integer }|nil, string[]|nil Name and 0-based, end-exclusive line range of the section used, and the script
 M.from_lines = function(lines, original)
     local text = table.concat(lines, "\n") .. "\n"
     -- `query.parse` is memoized, so this only parses the queries once
@@ -105,6 +149,7 @@ M.from_lines = function(lines, original)
     local method, url = "GET", nil
     local headers = {}
     local body_lines = {}
+    local script
     for id, node in fields_query:iter_captures(request_node, text) do
         local capture = fields_query.captures[id]
         local node_text = vim.treesitter.get_node_text(node, text)
@@ -127,6 +172,19 @@ M.from_lines = function(lines, original)
             end
         elseif capture == "body" then
             body_lines = vim.split(node_text, "\n", { plain = true })
+        elseif capture == "handler" then
+            -- Read from the text: the grammar only parses a `{% %}` spanning several lines
+            local inner = node_text:match("^>%s*{%%(.-)%%}%s*$")
+            if inner then
+                script = vim.split(inner, "\n", { plain = true })
+                while #script > 0 and script[1]:match("^%s*$") do
+                    table.remove(script, 1)
+                end
+                while #script > 0 and script[#script]:match("^%s*$") do
+                    table.remove(script)
+                end
+                script = #script > 0 and script or nil
+            end
         end
     end
     if not url or url == "" then
@@ -147,7 +205,7 @@ M.from_lines = function(lines, original)
     local body = request.body
     if body and body.mode and body.mode ~= "raw" then
         -- Not representable in the HTTP format: leave the original body untouched
-        return request, nil, range
+        return request, nil, range, script
     end
     if #body_lines > 0 then
         request.body = vim.tbl_extend("force", body or {}, { mode = "raw", raw = table.concat(body_lines, "\n") })
@@ -155,7 +213,7 @@ M.from_lines = function(lines, original)
         request.body = nil
     end
 
-    return request, nil, range
+    return request, nil, range, script
 end
 
 return M

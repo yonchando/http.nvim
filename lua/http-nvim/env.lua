@@ -65,12 +65,25 @@ local function env_text(value)
     return type(value) == "string" and value or vim.json.encode(value)
 end
 
---- `KEY=value`, commented out with `# ` when the variable is disabled.
+-- What a secret value shows as in the panel
+local mask = "********"
+
+--- `KEY=value`, commented out with `# ` when the variable is disabled. A secret
+--- variable (`type = "secret"`) has its value masked in the panel, and ends with
+--- `# secret` in the edit buffer.
 ---@param var EnvVar
 ---@param separator string `=` in the edit buffer, ` = ` in the panel
+---@param masked boolean|nil Mask a secret value, for the panel
 ---@return string
-local function env_line(var, separator)
-    return (var.enabled == false and "# " or "") .. var.key .. separator .. env_text(var.value)
+local function env_line(var, separator, masked)
+    local secret = var.type == "secret"
+    local value
+    if secret and masked then
+        value = mask
+    else
+        value = env_text(var.value) .. (secret and " # secret" or "")
+    end
+    return (var.enabled == false and "# " or "") .. var.key .. separator .. value
 end
 
 ---@param key string
@@ -84,8 +97,9 @@ local function find(key)
 end
 
 --- Parse `KEY=value` lines; `# KEY=value` is a disabled variable. Other `#`
---- comments and blank lines are skipped, and a value wrapped in matching quotes
---- loses them. Variables keep the other fields they had, and a value that reads
+--- comments and blank lines are skipped. A line ending with `# secret` is a
+--- secret variable, and without it a secret one becomes `default`. A value
+--- wrapped in matching quotes loses them. Variables keep the other fields they had, and a value that reads
 --- back as the JSON of a non-string original keeps that original.
 ---@param lines string[]
 ---@return EnvVar[]|nil vars, string|nil err
@@ -109,6 +123,8 @@ local function parse_env_lines(lines)
                 return nil, "line " .. i .. ": duplicate variable '" .. key .. "'"
             end
             seen[key] = true
+            local unmarked = value:match("^(.-)%s+#%s*secret%s*$") or (value:match("^#%s*secret%s*$") and "")
+            value = unmarked or value
             local quote = value:sub(1, 1)
             if #value >= 2 and (quote == '"' or quote == "'") and value:sub(-1) == quote then
                 value = value:sub(2, -2)
@@ -119,10 +135,58 @@ local function parse_env_lines(lines)
                 var.value = value
             end
             var.enabled = enabled
+            if unmarked then
+                var.type = "secret"
+            elseif var.type == "secret" then
+                var.type = "default"
+            end
             table.insert(vars, var)
         end
     end
     return vars, nil
+end
+
+--- Set variables (e.g. from a response handler) and save the environment: a
+--- new key is added, an existing one gets the value and stays enabled or not.
+--- `secret` makes the variable a secret one; otherwise an existing one keeps its type.
+--- The panel and an unmodified environment edit buffer show the new values.
+---@param vars { key: string, value: any, secret: boolean|nil }[]
+local function set_vars(vars)
+    for _, new in ipairs(vars) do
+        local var = find(new.key)
+        if var then
+            var.value = new.value
+            if new.secret then
+                var.type = "secret"
+            end
+        else
+            table.insert(state.env, {
+                key = new.key,
+                value = new.value,
+                type = new.secret and "secret" or "default",
+                enabled = true,
+            })
+        end
+    end
+    if not write_env() then
+        return
+    end
+    local bufnr = state.env_buf
+    if bufnr and vim.api.nvim_buf_is_loaded(bufnr) then
+        if vim.bo[bufnr].modified then
+            vim.notify("http-nvim: the environment edit buffer has unsaved changes; saving it overwrites the new values",
+                vim.log.levels.WARN)
+        else
+            vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.tbl_map(function(var)
+                return env_line(var, "=")
+            end, state.env))
+            vim.bo[bufnr].modified = false
+        end
+    end
+    if state.split and state.split.bufnr and vim.api.nvim_buf_is_valid(state.split.bufnr) then
+        -- The panel requires this module
+        require("http-nvim.panel").render()
+    end
 end
 
 --- Replace every `{{key}}` with its environment value; unknown and disabled keys are left as is.
@@ -143,5 +207,6 @@ return {
     write_env = write_env,
     env_line = env_line,
     parse_env_lines = parse_env_lines,
+    set_vars = set_vars,
     expand_env = expand_env,
 }

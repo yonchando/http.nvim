@@ -13,6 +13,7 @@ local state = require("http-nvim.state")
 ---@field name string
 ---@field item PostmanItem[]|nil
 ---@field request PostmanRequest|string|nil
+---@field event { listen: string, script: { type: string, exec: string[]|string } }[]|nil Postman scripts; the `test` one is the response handler
 
 --- Postman collection format v2.1.
 ---@class PostmanCollection

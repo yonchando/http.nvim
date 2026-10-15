@@ -8,6 +8,7 @@ CONTENTS                                              *http-nvim-contents*
   3. Commands ........................ |http-nvim-commands|
   4. Keymaps ......................... |http-nvim-keymaps|
   5. Highlights ...................... |http-nvim-highlights|
+  6. Response handler ................ |http-nvim-response-handler|
 
 ==============================================================================
 1. INTRODUCTION                                          *http-nvim-intro*
@@ -22,6 +23,8 @@ browse, edit and send them without leaving Neovim.
   `{{key}}`.
 - Send a request with curl and see the status, response and headers in a
   floating window.
+- Set environment variables from the response with a `> {% %}` response
+  handler, see |http-nvim-response-handler|.
 
 Each collection lives in its own folder, holding `collection.json` (a
 Postman v2.1 collection) and `env.json` (a Postman environment), so both
@@ -120,7 +123,8 @@ Each key is described below.
                     yet, ask which one first, as |:Http| does.
 <leader>hrp         Show the last request and its response again,
                     without sending it.
-<leader>hre         Send the last request again.
+<leader>hre         Send the last request again, as it is now: from its
+                    edit buffer if open (saved or not), else as saved.
 <leader>hrr         Send the request under the cursor, or the edit
                     buffer as it is now, and show the response.
                     `{{key}}` is replaced with the environment variable.
@@ -130,7 +134,9 @@ e                   Edit the request under the cursor as a `.http` file
                     (JetBrains HTTP Client format); |:w| saves it.
                     On the environment variables, edit them as
                     `KEY=value` lines; `# KEY=value` is a disabled
-                    variable, which `{{key}}` does not use.
+                    variable, which `{{key}}` does not use, and
+                    `KEY=value # secret` a secret one (Postman type
+                    `secret`), whose value the panel masks.
 r                   Rename the request or folder under the cursor.
 a                   Add a request or folder. `a/b/name` also creates the
                     folders `a/b`; `a/b/` adds only the folders.
@@ -173,5 +179,48 @@ vim-fugitive. Override any of them with |:highlight|.
   httpNvimRequest      Request name                    not linked
   httpNvimCut          Item cut with |x|                underlined
   httpNvimCopy         Item copied with |y|             links to httpNvimCut
+
+==============================================================================
+6. RESPONSE HANDLER                           *http-nvim-response-handler*
+
+A request in the edit buffer can end with a response handler script. After
+each response, every variable it sets is added to the environment, or
+updated if it exists, and `env.json` is saved: >http
+
+    ### login
+    POST {{url}}/login
+    Content-Type: application/json
+
+    { "user": "me" }
+
+    > {%
+      request.variables.set("token", response.body.data.token)
+      client.global.set("auth", "Bearer " + response.body.data.token)
+    %}
+<
+A one-line `> {% ... %}` works too. The script is saved with |:w| as the
+request's Postman `test` event, and runs when sending from the panel, the
+edit buffer or with `<leader>hre`.
+
+There is no JavaScript engine: only `set("key", value)` calls on
+`request.variables`, `client.global`, `pm.environment`, `pm.globals`,
+`pm.collectionVariables` and `pm.variables` are read, the rest is ignored.
+`secret("key", value)` on the same objects sets the variable as a secret
+one (Postman type `secret`, masked in the panel); `set` keeps the type of
+an existing variable.
+The value is one or more terms joined with `+`:
+
+  `"text"`, `'text'`, `42`              A literal
+  `response.body.a[0]["b"]`         The JSON body, through `.key`, `[0]`
+                                    and `["key"]`; `.length` of a list
+  `pm.response.json().a`            Same as `response.body.a`
+  `pm.response.text()`              The body as text
+  `response.status`                 The status code, also `pm.response.code`
+  `response.headers.valueOf("X")`   A response header, also
+                                    `pm.response.headers.get("X")`
+
+A single term that is an object or list is stored as is; anything else is
+stored as text. A value that can't be read (e.g. a missing key) is reported
+and that variable is left unchanged.
 
  vim:tw=78:ts=8:ft=help:norl:
