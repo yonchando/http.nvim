@@ -18,6 +18,7 @@
 ---@field deleted DeletedItem[] Deleted folders and requests, most recent last, for `u`
 ---@field edit_bufs table<PostmanItem, integer> Edit buffer of each request opened with `e`
 ---@field clipboard { node: PostmanItem, mode: "cut"|"copy" }|nil Item marked with `x` (cut) or `y` (copy), pasted by `p`
+---@field lsp { autotrigger: boolean }|false Completion server for edit buffers, set by `setup({ lsp })`; false when off
 ---@field view vim.fn.winsaveview.ret|nil Cursor and scroll of the panel when it was last closed, restored on open
 local state = {
     collection_dir = vim.fn.stdpath("data") .. "/http-nvim/collections",
@@ -39,6 +40,7 @@ local state = {
     edit_bufs = {},
     clipboard = nil,
     deleted = {},
+    lsp = { autotrigger = false },
 }
 
 return state

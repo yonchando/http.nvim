@@ -69,6 +69,25 @@ keymaps             Keys per action, see |http-nvim-keymaps|. Each value
         },
     })
 <
+lsp                 Completion in request edit buffers, from a language
+                    server built into the plugin (no install needed).
+                    It completes `{{key}}` with the environment
+                    variables, the method, header names and common
+                    values, and the response handler API inside
+                    `> {% %}`. |K| (|vim.lsp.buf.hover()|) on a `{{key}}`
+                    shows its value, masked when secret, or that it
+                    is disabled or not set. Completion plugins such as blink.cmp or
+                    nvim-cmp pick it up as an LSP source; without one,
+                    use |i_CTRL-X_CTRL-O|. Defaults to
+                    `{ autotrigger = false }`; `false` turns it off.
+                    `autotrigger = true` opens Neovim's own completion
+                    menu while typing (|vim.lsp.completion.enable()|);
+                    leave it off when you use a completion plugin. >lua
+
+    require("http-nvim").setup({
+        lsp = { autotrigger = true },
+    })
+<
 
 ==============================================================================
 3. COMMANDS                                           *http-nvim-commands*

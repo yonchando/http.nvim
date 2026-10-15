@@ -86,6 +86,10 @@ require("http-nvim").setup({
         focus_headers = "<C-l>",
         focus_response = "<C-h>",
     },
+    -- Completion in request edit buffers from a built-in language server, or false.
+    -- autotrigger opens Neovim's own completion menu while typing; leave it off
+    -- with a completion plugin (blink.cmp, nvim-cmp), which picks the server up itself.
+    lsp = { autotrigger = false },
 })
 ```
 
@@ -131,6 +135,8 @@ Content-Type: application/json
   client.global.set("auth", "Bearer " + response.body.data.token)
 %}
 ```
+
+In an edit buffer, a built-in language server completes `{{key}}` with the environment variables, the method, header names and common values, and the response handler API inside `> {% %}`. `K` on a `{{key}}` shows its value (masked when secret), or that it is disabled or not set. A completion plugin shows it like any LSP source; without one, use `<C-x><C-o>` or set `lsp = { autotrigger = true }`.
 
 Press `e` on the environment variables in the panel to edit them as `KEY=value` lines, like a `.env` file. `# KEY=value` is a disabled variable, which `{{key}}` doesn't use. `KEY=value # secret` marks a secret variable (Postman type `secret`), whose value the panel shows as `********`.
 

@@ -4,6 +4,7 @@ local collection = require("http-nvim.collection")
 local env = require("http-nvim.env")
 local jetbrains = require("http-nvim.jetbrains")
 local keymaps = require("http-nvim.keymaps")
+local lsp = require("http-nvim.lsp")
 local request = require("http-nvim.request")
 local state = require("http-nvim.state")
 
@@ -217,6 +218,7 @@ local function edit()
     open_edit_window()
     vim.api.nvim_set_current_buf(bufnr)
     state.edit_bufs[node] = bufnr
+    lsp.attach(bufnr)
 
     -- Send what the buffer holds now, saved or not
     keymaps.map("send", function()
