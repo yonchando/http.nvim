@@ -1,7 +1,7 @@
 --- Named collections: one folder per collection in `state.collection_dir`, each
 --- holding `collection.json` and `env.json`. Creating, listing and choosing them.
 local collection = require("http-nvim.collection")
-local edit = require("http-nvim.edit")
+local request_edit = require("http-nvim.request_edit")
 local state = require("http-nvim.state")
 
 --- Folder names in `collection_dir`, sorted.
@@ -44,7 +44,7 @@ local function select(name)
         return true
     end
     if state.selected then
-        local closed, modified = edit.close_edit_bufs()
+        local closed, modified = request_edit.close_edit_bufs()
         if not closed then
             vim.notify("http-nvim: save or discard " .. modified .. " before switching collections; keeping '"
                 .. state.selected .. "'", vim.log.levels.ERROR)
@@ -58,6 +58,7 @@ local function select(name)
     state.selected = name
     state.collection_path = dir .. "/collection.json"
     state.env_path = dir .. "/env.json"
+    state.cookie_path = dir .. "/cookie"
     -- Load the new files on the next `open()`
     state.collection = nil
     return true

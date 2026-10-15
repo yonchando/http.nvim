@@ -86,6 +86,10 @@ require("http-nvim").setup({
         focus_headers = "<C-l>",
         focus_response = "<C-h>",
     },
+    -- Completion in request edit buffers from a built-in language server, or false.
+    -- autotrigger opens Neovim's own completion menu while typing; leave it off
+    -- with a completion plugin (blink.cmp, nvim-cmp), which picks the server up itself.
+    lsp = { autotrigger = false },
 })
 ```
 
@@ -93,6 +97,8 @@ Each collection is a folder in `collection_dir` holding:
 
 - `collection.json`: a Postman v2.1 collection, which Postman can import
 - `env.json`: a Postman environment with its variables
+
+Each collection also gets a `cookie` file, its curl cookie jar: cookies set by responses are saved there and sent with its next requests. Manage it with the `:HttpCookies*` commands.
 
 Both can be imported into Postman, and Postman exports (a collection, and an environment saved as `env.json`) work here too.
 
@@ -127,10 +133,12 @@ Content-Type: application/json
 { "user": "me" }
 
 > {%
-  request.variables.set("token", response.body.data.token)
+  client.global.set("token", response.body.data.token)
   client.global.set("auth", "Bearer " + response.body.data.token)
 %}
 ```
+
+In an edit buffer, a built-in language server completes `{{key}}` with the environment variables, the method, header names and common values, cookie names from the collection's jar (in a `Cookie:` header and in `response.cookiesByName("")`), and the response handler API inside `> {% %}`. `K` on a `{{key}}` shows its value (masked when secret), or that it is disabled or not set. A completion plugin shows it like any LSP source; without one, use `<C-x><C-o>` or set `lsp = { autotrigger = true }`.
 
 Press `e` on the environment variables in the panel to edit them as `KEY=value` lines, like a `.env` file. `# KEY=value` is a disabled variable, which `{{key}}` doesn't use. `KEY=value # secret` marks a secret variable (Postman type `secret`), whose value the panel shows as `********`.
 
@@ -140,6 +148,10 @@ Press `e` on the environment variables in the panel to edit them as `KEY=value` 
 |---|---|
 | `:Http` | Choose a collection and open it in the panel |
 | `:Http create {name}` | Create a collection |
+| `:HttpCookies` | Show the collection's cookies in a floating window, values masked (`abc1…`) |
+| `:HttpCookiesClear` | Delete the collection's cookie jar, like logging out of everything |
+| `:HttpCookiesDelete {name}` | Remove one cookie |
+| `:HttpCookiesEdit` | Open the cookie jar file in a buffer |
 
 ### Keymaps
 
@@ -170,6 +182,6 @@ See `:help http-nvim` for details.
 - [x] Add new requests and folders
 - [x] Send a request and show the result
 - [x] Read the response in `.http` and set environment variables from it
-- [ ] Support HTML and other content types in the response
-- [ ] Support cookie sessions
+- [x] Support cookie sessions
 - [ ] Support WebSocket requests
+- [ ] Support HTML and other content types in the response

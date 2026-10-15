@@ -3,6 +3,7 @@
 ---@field selected string|nil Name of the chosen collection, a folder in `collection_dir`
 ---@field collection_path string|nil `collection.json` of the selected collection
 ---@field env_path string|nil `env.json` of the selected collection
+---@field cookie_path string|nil `cookie` of the selected collection: curl's cookie jar
 ---@field split NuiSplit|nil
 ---@field collection PostmanCollection|nil The loaded collection, written back to `collection_path` on save
 ---@field items PostmanItem[]|nil Top-level items of the loaded collection
@@ -18,12 +19,14 @@
 ---@field deleted DeletedItem[] Deleted folders and requests, most recent last, for `u`
 ---@field edit_bufs table<PostmanItem, integer> Edit buffer of each request opened with `e`
 ---@field clipboard { node: PostmanItem, mode: "cut"|"copy" }|nil Item marked with `x` (cut) or `y` (copy), pasted by `p`
+---@field lsp { autotrigger: boolean }|false Completion server for edit buffers, set by `setup({ lsp })`; false when off
 ---@field view vim.fn.winsaveview.ret|nil Cursor and scroll of the panel when it was last closed, restored on open
 local state = {
     collection_dir = vim.fn.stdpath("data") .. "/http-nvim/collections",
     selected = nil,
     collection_path = nil,
     env_path = nil,
+    cookie_path = nil,
     split = nil,
     collection = nil,
     items = nil,
@@ -39,6 +42,7 @@ local state = {
     edit_bufs = {},
     clipboard = nil,
     deleted = {},
+    lsp = { autotrigger = false },
 }
 
 return state

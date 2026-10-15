@@ -4,6 +4,7 @@ local collection = require("http-nvim.collection")
 local env = require("http-nvim.env")
 local jetbrains = require("http-nvim.jetbrains")
 local keymaps = require("http-nvim.keymaps")
+local lsp = require("http-nvim.lsp")
 local request = require("http-nvim.request")
 local state = require("http-nvim.state")
 
@@ -26,7 +27,7 @@ end
 local function rename_edit_bufs(item, path, renamed)
     local bufnr = state.edit_bufs[item]
     if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
-        pcall(vim.api.nvim_buf_set_name, bufnr, "http-nvim://" .. path .. " (edit)")
+        pcall(vim.api.nvim_buf_set_name, bufnr, "http-nvim://" .. path)
         if renamed and vim.api.nvim_buf_is_loaded(bufnr) then
             local modified = vim.bo[bufnr].modified
             for i, line in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
@@ -140,7 +141,7 @@ local function edit_env()
             return env_line(var, "=")
         end, state.env)
 
-        bufnr = create_edit_buf("http-nvim-env://" .. vim.fn.fnamemodify(state.env_path, ":t") .. " (edit)",
+        bufnr = create_edit_buf("http-nvim-env://" .. vim.fn.fnamemodify(state.env_path, ":t"),
             vim.filetype.match({ filename = ".env" }) or "sh")
         if not bufnr then
             return
@@ -196,7 +197,7 @@ local function edit()
         return
     end
 
-    local name = "http-nvim://" .. state.line_paths[line] .. " (edit)"
+    local name = "http-nvim://" .. state.line_paths[line]
     local bufnr = state.edit_bufs[node]
     if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
         if vim.api.nvim_buf_is_loaded(bufnr) then
@@ -217,6 +218,7 @@ local function edit()
     open_edit_window()
     vim.api.nvim_set_current_buf(bufnr)
     state.edit_bufs[node] = bufnr
+    lsp.attach(bufnr)
 
     -- Send what the buffer holds now, saved or not
     keymaps.map("send", function()
@@ -246,9 +248,9 @@ local function edit()
             if section.name ~= node.name then
                 node.name = section.name
                 -- Read the path from the buffer name: `r` may have renamed a parent folder since
-                local path = vim.api.nvim_buf_get_name(bufnr):match("^http%-nvim://(.*) %(edit%)$") or ""
+                local path = vim.api.nvim_buf_get_name(bufnr):match("^http%-nvim://(.*)$") or ""
                 path = (path:match("^(.*/)") or "") .. section.name
-                pcall(vim.api.nvim_buf_set_name, bufnr, "http-nvim://" .. path .. " (edit)")
+                pcall(vim.api.nvim_buf_set_name, bufnr, "http-nvim://" .. path)
             end
             node.request = request
             jetbrains.set_script(node, script)

@@ -45,6 +45,10 @@ local function curl_args(request)
         "curl", "--silent", "--show-error", "--verbose", "--globoff",
         "--request", method, "--write-out", "\n%{http_code}",
     }
+    -- Cookies are kept between requests, in a jar per collection
+    if state.cookie_path then
+        vim.list_extend(args, { "--cookie", state.cookie_path, "--cookie-jar", state.cookie_path })
+    end
     if type(request) == "table" then
         for _, header in ipairs(request.header or {}) do
             if not header.disabled then
@@ -218,6 +222,7 @@ local function send_request(request, script, node)
             handler.run(script, {
                 status = tonumber(status),
                 headers = handler.parse_headers(headers),
+                cookies = handler.parse_cookies(headers),
                 body = ok and decoded or text,
                 text = text,
             })
