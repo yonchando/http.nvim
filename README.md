@@ -7,6 +7,19 @@ Keep your API requests in Postman collections and browse, edit and send them wit
 - Keep environment variables per collection and use them in requests as `{{key}}`
 - Send a request with curl and see the status, response and headers in a floating window
 
+> [!CAUTION]
+> **Breaking changes.** This is a rewrite. Requests now live in Postman collections browsed from a panel, instead of being run from any `.http` file. The `:HttpRun`, `:HttpResult`, `:HttpRerun`, `:HttpClose` and `:HttpHistory` commands are gone, and so are `http.last_result` and the old keymaps.
+>
+> To keep the old version, pin the `v0.1.0` branch:
+>
+> ```lua
+> -- lazy.nvim
+> { "yonchando/http.nvim", branch = "v0.1.0" }
+>
+> -- vim.pack
+> vim.pack.add({ { src = "https://github.com/yonchando/http.nvim", version = "v0.1.0" } })
+> ```
+
 ## Requirements
 
 - Neovim with the tree-sitter `http` parser (`:TSInstall http`)
