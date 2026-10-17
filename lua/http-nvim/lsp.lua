@@ -6,6 +6,7 @@
 --- `{{key}}` on hover. It reads the buffer
 --- straight from Neovim, so it doesn't track `didOpen`/`didChange`.
 local cookies = require("http-nvim.cookies")
+local dynamic = require("http-nvim.dynamic")
 local state = require("http-nvim.state")
 
 local kind = vim.lsp.protocol.CompletionItemKind
@@ -57,13 +58,19 @@ local script_items = {
     { "response.cookiesByName", 'response.cookiesByName("${1:name}")', ">" },
     { "decodeURIComponent", "decodeURIComponent(${1})" },
     { "encodeURIComponent", "encodeURIComponent(${1})" },
-    { "$uuid", "\\$uuid" },
-    { "$timestamp", "\\$timestamp" },
-    { "$isoTimestamp", "\\$isoTimestamp" },
-    { "$randomInt", "\\$randomInt" },
-    { "$random.uuid", "\\$random.uuid" },
-    { "$random.integer", "\\$random.integer(${1:0}, ${2:1000})" },
 }
+
+--- A dynamic variable as a snippet: `$` escaped, arguments as placeholders.
+---@param name string
+---@return string
+local function dynamic_snippet(name)
+    local args = dynamic.variables[name].args
+    return "\\" .. name .. (args and "(" .. args .. ")" or "")
+end
+
+for _, name in ipairs(vim.fn.sort(vim.tbl_keys(dynamic.variables))) do
+    table.insert(script_items, { name, dynamic_snippet(name) })
+end
 
 ---@param line integer 0-based
 ---@param from integer 0-based byte column
@@ -86,8 +93,8 @@ local function shown_value(var)
     return type(var.value) == "string" and var.value or vim.json.encode(var.value)
 end
 
---- Enabled environment variables, as `{{key}}` would use them.
-local function env_items(row, from, col, closed)
+--- Enabled environment variables, as `{{key}}` would use them, and the dynamic variables when `with_dynamic`.
+local function env_items(row, from, col, closed, with_dynamic)
     local items = {}
     for _, var in ipairs(state.env) do
         if var.enabled ~= false then
@@ -98,6 +105,16 @@ local function env_items(row, from, col, closed)
                 textEdit = edit(row, from, col, var.key .. (closed and "" or "}}")),
             })
         end
+    end
+    -- `{{$name}}`: a new value each time
+    for name, variable in pairs(with_dynamic and dynamic.variables or {}) do
+        table.insert(items, {
+            label = name,
+            kind = kind.Function,
+            detail = variable.doc,
+            insertTextFormat = snippet_format,
+            textEdit = edit(row, from, col, dynamic_snippet(name) .. (closed and "" or "}}")),
+        })
     end
     return items
 end
@@ -188,9 +205,9 @@ local function complete(params)
     local line = lines[row] or ""
     local before, after = line:sub(1, col), line:sub(col + 1)
 
-    local key = before:match("{{%s*([%w_%-%.]*)$")
+    local key = before:match("{{%s*([%w_%-%.%$]*)$")
     if key then
-        return env_items(row0, col - #key, col, after:match("^%s*}}") ~= nil)
+        return env_items(row0, col - #key, col, after:match("^%s*}}") ~= nil, true)
     end
 
     local script = script_at(lines, row)
@@ -288,13 +305,19 @@ local function hover(params)
     local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ""
     local init = 1
     while true do
-        local from, to, key = line:find("{{%s*([^{}%s]+)%s*}}", init)
+        local from, to, key = line:find("{{%s*([^{}]-)%s*}}", init)
         if not from then
             return nil
         end
         -- `from`/`to` are 1-based and inclusive, `col` 0-based
         if col >= from - 1 and col < to then
             local text = "`{{" .. key .. "}}` is not set"
+            local name = key:match("^(%$[%w_%.]+)")
+            if name then
+                local variable = dynamic.variables[name]
+                text = variable and "`" .. name .. "`: " .. variable.doc .. ", made anew on each send"
+                    or "`" .. name .. "` is not a dynamic variable"
+            end
             for _, var in ipairs(state.env) do
                 if var.key == key then
                     text = "`" .. key .. "` = `" .. shown_value(var) .. "`"

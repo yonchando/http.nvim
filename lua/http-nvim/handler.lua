@@ -21,9 +21,8 @@
 --- cookies the response set, accessors allowed) or `response.cookiesByName("name")`.
 --- `decodeURIComponent(value)` and `encodeURIComponent(value)` wrap any value.
 --- In both kinds of script, `client.global.get("key")` reads a variable, and
---- `$uuid`, `$timestamp`, `$isoTimestamp`, `$randomInt`, `$random.uuid` and
---- `$random.integer(from, to)` make a value. Each variable is set in the
---- environment and saved.
+--- the dynamic variables of `dynamic.lua` (`$uuid`, `$random.email`, ...) make
+--- a value. Each variable is set in the environment and saved.
 
 ---@class HandlerResponse
 ---@field status integer|nil
@@ -36,6 +35,8 @@
 ---@class HandlerContext
 ---@field response HandlerResponse|nil nil in a pre-request script
 ---@field pending table<string, { value: any, secret: boolean }> Variables set by the scripts so far, not saved yet
+
+local dynamic = require("http-nvim.dynamic")
 
 -- The object whose `set(key, value)` and `secret(key, value)` set an environment variable
 local setter = "client.global"
@@ -172,32 +173,6 @@ end
 
 local eval
 
-math.randomseed(vim.uv.hrtime())
-
---- A random version 4 UUID.
----@return string
-local function uuid()
-    return (("xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"):gsub("[xy]", function(c)
-        local n = math.random(0, 15)
-        return ("%x"):format(c == "x" and n or 8 + n % 4)
-    end))
-end
-
--- Values made anew each time: the JetBrains dynamic variables
-local dynamic = {
-    ["$uuid"] = uuid,
-    ["$random.uuid"] = uuid,
-    ["$timestamp"] = function()
-        return os.time()
-    end,
-    ["$isoTimestamp"] = function()
-        return os.date("!%Y-%m-%dT%H:%M:%SZ")
-    end,
-    ["$randomInt"] = function()
-        return math.random(0, 1000)
-    end,
-}
-
 -- JavaScript's `encodeURIComponent` keeps these as is
 local function encode_uri_component(text)
     return (text:gsub("[^%w%-_%.!~%*'%(%)]", function(c)
@@ -234,19 +209,9 @@ local function eval_term(term, ctx)
     if term:match("^%-?%d+%.?%d*$") then
         return tonumber(term), nil
     end
-    if dynamic[term] then
-        return dynamic[term](), nil
-    end
-    local range = term:match("^%$random%.integer%((.*)%)$")
-    if range then
-        local parts = vim.tbl_filter(function(part)
-            return part ~= ""
-        end, split_top(range, 1, ","))
-        local from, to = tonumber(parts[1] or "0"), tonumber(parts[2] or "1000")
-        if #parts > 2 or not from or not to or math.floor(from) ~= from or math.floor(to) ~= to or from > to then
-            return nil, "expected $random.integer(from, to) with whole numbers"
-        end
-        return math.random(from, to), nil
+    if term:match("^%$") then
+        local value, err = dynamic.eval(term)
+        return value, err
     end
     local _, key = term:match("^client%.global%.get%(%s*([\"'])(.-)%1%s*%)$")
     if key then

@@ -179,7 +179,9 @@ Each key is described below.
                     edit buffer if open (saved or not), else as saved.
 <leader>hrr         Send the request under the cursor, or the edit
                     buffer as it is now, and show the response.
-                    `{{key}}` is replaced with the environment variable.
+                    `{{key}}` is replaced with the environment variable,
+                    and `{{$name}}` with a dynamic variable
+                    (|http-nvim-dynamic|).
 g?                  Open this help.
 <CR> or =           Expand or collapse the folder under the cursor.
 e                   Edit the request under the cursor as a `.http` file
@@ -289,15 +291,44 @@ The value is one or more terms joined with `+`:
                                     does
   `client.global.get("key")`        A variable: the environment's, or what
                                     an earlier `set` of this send gave it
-  `$uuid`, `$random.uuid`           A random UUID (version 4)
-  `$timestamp`                      The Unix time, in seconds
-  `$isoTimestamp`                   The UTC time, e.g. `2026-10-17T09:30:00Z`
-  `$randomInt`                      A random integer from 0 to 1000
-  `$random.integer(from, to)`       A random integer from {from} to {to}
+  `$uuid`, `$random.email`, ...     A dynamic variable, see below
 
 A single term that is an object or list is stored as is; anything else is
 stored as text. A value that can't be read (e.g. a missing key) is reported
 and that variable is left unchanged.
+
+                                                      *http-nvim-dynamic*
+Dynamic variables make a new value each time they are read, in a script
+(`$random.email`) or anywhere in a request (`{{$random.email}}`). They are
+named after the JetBrains HTTP Client ones and made by the plugin itself,
+with nothing to install. The arguments are numbers; leave them out for the
+defaults:
+
+  `$uuid`, `$random.uuid`              A random UUID (version 4)
+  `$timestamp`                         The Unix time, in seconds
+  `$isoTimestamp`                      The UTC time, e.g. `2026-10-17T09:30:00Z`
+  `$randomInt`                         A random integer from 0 to 1000
+  `$random.integer(from, to)`          A random integer from {from} to {to}
+                                       (0 and 1000)
+  `$random.float(from, to)`            A random number from {from} to {to}
+                                       (0 and 1000)
+  `$random.alphabetic(length)`         {length} random letters (10)
+  `$random.alphanumeric(length)`       {length} random letters, digits and
+                                       `_` (10)
+  `$random.hexadecimal(length)`        {length} random hex digits (10)
+  `$random.email`                      A random address at `example.com`
+
+In a request, an unknown name or bad arguments leave the `{{...}}` as is.
+To use the same value twice, set it once in a pre-request script and use
+the variable: >http
+
+    < {%
+      client.global.set("email", $random.email)
+    %}
+    POST {{url}}/users
+
+    { "email": "{{email}}", "confirm": "{{email}}" }
+<
 
 ==============================================================================
 7. SCRIPTS                                           *http-nvim-scripts*

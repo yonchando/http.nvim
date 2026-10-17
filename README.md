@@ -139,7 +139,7 @@ Content-Type: application/json
 %}
 ```
 
-A pre-request script, `< {% %}` after the `### name` line, runs before the request is sent, so the request can use the variables it sets. It can't read `response.*`, but it can set headers of the request with `request.headers.set("Name", value)` (replacing a header of that name, like Postman's `pm.request.headers.upsert()`, only for this send), and use `client.global.get("key")` and the dynamic values `$uuid`, `$timestamp`, `$isoTimestamp`, `$randomInt` and `$random.integer(from, to)`, which response handlers can use too:
+A pre-request script, `< {% %}` after the `### name` line, runs before the request is sent, so the request can use the variables it sets. It can't read `response.*`, but it can set headers of the request with `request.headers.set("Name", value)` (replacing a header of that name, like Postman's `pm.request.headers.upsert()`, only for this send), and use `client.global.get("key")` and the dynamic variables, which response handlers can use too:
 
 ```http
 ### create order
@@ -150,6 +150,8 @@ A pre-request script, `< {% %}` after the `### name` line, runs before the reque
 POST {{url}}/orders
 Idempotency-Key: {{order_id}}
 ```
+
+Dynamic variables make a new value each time, in a script (`$random.email`) or anywhere in a request (`{{$random.email}}`). They follow the JetBrains names and are built in, with nothing to install: `$uuid`, `$timestamp`, `$isoTimestamp`, `$randomInt`, `$random.uuid`, `$random.integer(from, to)`, `$random.float(from, to)`, `$random.alphabetic(length)`, `$random.alphanumeric(length)`, `$random.hexadecimal(length)` and `$random.email`. See `:h http-nvim-dynamic`.
 
 The collection and each folder can have both kinds of script too, run around every request inside them, like Postman's collection and folder scripts. Press `S` on a folder in the panel, or on the "Collection scripts" line, to edit them. When sending, the pre-request scripts run from the collection's, then each folder's, down to the request's own, and after the response the handlers run in the same order. See `:h http-nvim-scripts`.
 

@@ -1,5 +1,6 @@
 --- Environment variables: loading and saving the environment file (Postman
 --- environment format), and replacing `{{key}}` with their values.
+local dynamic = require("http-nvim.dynamic")
 local state = require("http-nvim.state")
 
 --- A variable of a Postman environment. Other fields Postman writes are kept as is.
@@ -189,11 +190,20 @@ local function set_vars(vars)
     end
 end
 
---- Replace every `{{key}}` with its environment value; unknown and disabled keys are left as is.
+--- Replace every `{{key}}` with its environment value, and `{{$name}}` or
+--- `{{$name(args)}}` with a new value of that dynamic variable. Unknown and
+--- disabled keys are left as is, and so is a dynamic variable that fails.
 ---@param text string
 ---@return string
 local function expand_env(text)
-    return (text:gsub("{{%s*([^{}%s]+)%s*}}", function(key)
+    return (text:gsub("{{%s*([^{}]-)%s*}}", function(key)
+        if key:match("^%$") then
+            local value = dynamic.eval(key)
+            return value ~= nil and tostring(value) or nil
+        end
+        if key:find("%s") then
+            return nil
+        end
         local var = find(key)
         if not var or var.enabled == false then
             return nil
