@@ -26,10 +26,11 @@ syn match httpNvimFold      /^\s*\zs[▸▾]/ contained nextgroup=httpNvimFoldCo
 syn match httpNvimItemCount /^\s*\zs(\d\+)/hs=s+1,he=e-1 contained nextgroup=httpNvimItem skipwhite
 syn match httpNvimFoldCount /(\d\+)/hs=s+1,he=e-1 contained nextgroup=httpNvimItem skipwhite
 
-" Requests:  "    GET list users"
+" Requests:  "    GET list users", and " ƒ" after an item that has scripts
 syn match httpNvimMethod /^\s*\zs\%(GET\|POST\|PUT\|PATCH\|DELETE\|HEAD\|OPTIONS\)\ze\s\+[^=[:space:]]/ contained nextgroup=httpNvimRequest skipwhite
-syn match httpNvimRequest /.*$/ contained
-syn match httpNvimItem      /.*$/ contained
+syn match httpNvimRequest /.\{-}\ze\%( ƒ\)\=$/ contained nextgroup=httpNvimScriptMark
+syn match httpNvimItem      /.\{-}\ze\%( ƒ\)\=$/ contained nextgroup=httpNvimScriptMark
+syn match httpNvimScriptMark / ƒ$/ contained
 
 hi def link httpNvimHelpHeader httpNvimHeader
 hi def link httpNvimHeader     Label
@@ -45,6 +46,7 @@ hi def link httpNvimFoldCount  httpNvimItemCount
 hi def link httpNvimItem       Directory
 hi def link httpNvimFold       Special
 hi def link httpNvimMethod     Keyword
+hi def link httpNvimScriptMark Special
 hi def httpNvimCut gui=underline cterm=underline
 hi def link httpNvimCopy httpNvimCut
 

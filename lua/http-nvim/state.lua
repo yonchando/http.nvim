@@ -18,6 +18,8 @@
 ---@field line_lists table<integer, PostmanItem[]> The list that holds the item on each line
 ---@field deleted DeletedItem[] Deleted folders and requests, most recent last, for `u`
 ---@field edit_bufs table<PostmanItem, integer> Edit buffer of each request opened with `e`
+---@field script_bufs table<PostmanCollection|PostmanItem, integer> Scripts buffer of the collection or a folder, opened with `S`
+---@field line_scripts table<integer, boolean> The line of the collection's scripts
 ---@field clipboard { node: PostmanItem, mode: "cut"|"copy" }|nil Item marked with `x` (cut) or `y` (copy), pasted by `p`
 ---@field lsp { autotrigger: boolean }|false Completion server for edit buffers, set by `setup({ lsp })`; false when off
 ---@field view vim.fn.winsaveview.ret|nil Cursor and scroll of the panel when it was last closed, restored on open
@@ -40,6 +42,8 @@ local state = {
     line_paths = {},
     line_lists = {},
     edit_bufs = {},
+    script_bufs = {},
+    line_scripts = {},
     clipboard = nil,
     deleted = {},
     lsp = { autotrigger = false },

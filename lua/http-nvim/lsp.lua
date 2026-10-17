@@ -1,7 +1,8 @@
---- A built-in language server, running inside Neovim, for request edit buffers.
+--- A built-in language server, running inside Neovim, for request and scripts edit buffers.
 --- It completes `{{key}}` environment variables, methods, header names and
 --- values, cookie names from the collection's jar (in a `Cookie:` header and
---- `response.cookiesByName("")`), and the response handler API in `> {% %}`, and shows the value of a
+--- `response.cookiesByName("")`), the script API in `< {% %}` and `> {% %}`, and
+--- variable names in `client.global.get("")`, and shows the value of a
 --- `{{key}}` on hover. It reads the buffer
 --- straight from Neovim, so it doesn't track `didOpen`/`didChange`.
 local cookies = require("http-nvim.cookies")
@@ -42,17 +43,26 @@ local headers = {
     ["X-Requested-With"] = { "XMLHttpRequest" },
 }
 
--- What `handler.lua` understands in a response handler script: the JetBrains API only
+-- What `handler.lua` understands in a script: the JetBrains API only. The
+-- third field marks what only a pre-request script (`<`) or a response handler (`>`) has.
 local script_items = {
     { "client.global.set", 'client.global.set("${1:key}", ${0})' },
     { "client.global.secret", 'client.global.secret("${1:key}", ${0})' },
-    { "response.body", "response.body" },
-    { "response.status", "response.status" },
-    { "response.headers.valueOf", 'response.headers.valueOf("${1:Header}")' },
-    { "response.cookies", "response.cookies()" },
-    { "response.cookiesByName", 'response.cookiesByName("${1:name}")' },
+    { "client.global.get", 'client.global.get("${1:key}")' },
+    { "request.headers.set", 'request.headers.set("${1:Header}", ${0})', "<" },
+    { "response.body", "response.body", ">" },
+    { "response.status", "response.status", ">" },
+    { "response.headers.valueOf", 'response.headers.valueOf("${1:Header}")', ">" },
+    { "response.cookies", "response.cookies()", ">" },
+    { "response.cookiesByName", 'response.cookiesByName("${1:name}")', ">" },
     { "decodeURIComponent", "decodeURIComponent(${1})" },
     { "encodeURIComponent", "encodeURIComponent(${1})" },
+    { "$uuid", "\\$uuid" },
+    { "$timestamp", "\\$timestamp" },
+    { "$isoTimestamp", "\\$isoTimestamp" },
+    { "$randomInt", "\\$randomInt" },
+    { "$random.uuid", "\\$random.uuid" },
+    { "$random.integer", "\\$random.integer(${1:0}, ${2:1000})" },
 }
 
 ---@param line integer 0-based
@@ -109,17 +119,20 @@ local function cookie_items(row, from, col, with_value)
     return items
 end
 
---- Whether `row` is inside a `> {% ... %}` script, which starts on an earlier line.
+--- The script `row` is inside, which starts on an earlier line: `<` for a
+--- `< {% ... %}` pre-request script, `>` for a `> {% ... %}` response handler.
 ---@param lines string[]
 ---@param row integer 1-based
-local function in_script(lines, row)
-    local open = false
+---@return "<"|">"|nil
+local function script_at(lines, row)
+    local open
     for i = 1, row - 1 do
         local line = lines[i]
-        if line:match("^>%s*{%%") then
-            open = not line:match("%%}%s*$")
+        local mark = line:match("^%s*([<>])%s*{%%")
+        if mark then
+            open = not line:match("%%}%s*$") and mark or nil
         elseif line:match("%%}") then
-            open = false
+            open = nil
         end
     end
     return open
@@ -180,21 +193,34 @@ local function complete(params)
         return env_items(row0, col - #key, col, after:match("^%s*}}") ~= nil)
     end
 
-    if in_script(lines, row) then
-        local cookie = before:match("response%.cookiesByName%(%s*[\"']([^\"']*)$")
-            or before:match("response%.cookies%(%s*%)%.([%w_]*)$")
+    local script = script_at(lines, row)
+    if script then
+        local name = before:match("client%.global%.get%(%s*[\"']([^\"']*)$")
+        if name then
+            return env_items(row0, col - #name, col, true)
+        end
+        local cookie = script == ">" and (before:match("response%.cookiesByName%(%s*[\"']([^\"']*)$")
+            or before:match("response%.cookies%(%s*%)%.([%w_]*)$"))
         if cookie then
             return cookie_items(row0, col - #cookie, col, false)
         end
-        local word = before:match("[%w_%.]*$")
-        return vim.tbl_map(function(item)
-            return {
-                label = item[1],
-                kind = item[2]:find("%(") and kind.Function or kind.Property,
-                insertTextFormat = snippet_format,
-                textEdit = edit(row0, col - #word, col, item[2]),
-            }
-        end, script_items)
+        local word = before:match("[%w_%.%$]*$")
+        local items = {}
+        for _, item in ipairs(script_items) do
+            if not item[3] or item[3] == script then
+                table.insert(items, {
+                    label = item[1],
+                    kind = item[2]:find("%(") and kind.Function or kind.Property,
+                    insertTextFormat = snippet_format,
+                    textEdit = edit(row0, col - #word, col, item[2]),
+                })
+            end
+        end
+        return items
+    end
+    -- A scripts buffer holds nothing else
+    if vim.b[bufnr].http_nvim_scripts then
+        return {}
     end
 
     local request_row, header_end = section_rows(lines, row)
@@ -306,7 +332,7 @@ local function server(dispatchers)
                 callback(nil, {
                     capabilities = {
                         positionEncoding = "utf-8",
-                        completionProvider = { triggerCharacters = { "{", ":", " ", ".", '"' } },
+                        completionProvider = { triggerCharacters = { "{", ":", " ", ".", '"', "$" } },
                         hoverProvider = true,
                     },
                     serverInfo = { name = "http-nvim" },
@@ -340,7 +366,7 @@ local function server(dispatchers)
     }
 end
 
---- Attach the server to a request edit buffer, unless `setup({ lsp = false })`.
+--- Attach the server to a request or scripts edit buffer, unless `setup({ lsp = false })`.
 ---@param bufnr integer
 local function attach(bufnr)
     if not state.lsp then

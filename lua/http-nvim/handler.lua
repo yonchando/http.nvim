@@ -1,10 +1,17 @@
---- Response handler scripts (`> {% ... %}`), with the JetBrains HTTP Client API
---- only: there is no JavaScript engine, so only the calls that set a variable are
---- read, and their values are taken from the response:
+--- Pre-request (`< {% ... %}`) and response handler (`> {% ... %}`) scripts, with
+--- the JetBrains HTTP Client API only: there is no JavaScript engine, so only the
+--- calls that set a variable are read, and their values are taken from the
+--- response (after it) or the environment:
 ---
 ---   client.global.set("token", response.body.data.token)
 ---   client.global.set("auth", "Bearer " + response.body.token)
 ---   client.global.secret("password", response.body.password)
+---
+--- A pre-request script can also set a header of the request it runs before
+--- (added, or replacing an enabled one of that name), like Postman's
+--- `pm.request.headers.upsert()`:
+---
+---   request.headers.set("X-XSRF-TOKEN", client.global.get("xsrf"))
 ---
 --- `secret(key, value)` works like `set` and also makes the variable a secret
 --- one (Postman type `secret`), masked in the panel; `set` keeps the type.
@@ -13,7 +20,10 @@
 --- `response.headers.valueOf("Name")`, `response.cookies()` (an object of the
 --- cookies the response set, accessors allowed) or `response.cookiesByName("name")`.
 --- `decodeURIComponent(value)` and `encodeURIComponent(value)` wrap any value.
---- Each variable is set in the environment and saved.
+--- In both kinds of script, `client.global.get("key")` reads a variable, and
+--- `$uuid`, `$timestamp`, `$isoTimestamp`, `$randomInt`, `$random.uuid` and
+--- `$random.integer(from, to)` make a value. Each variable is set in the
+--- environment and saved.
 
 ---@class HandlerResponse
 ---@field status integer|nil
@@ -22,8 +32,15 @@
 ---@field body any Decoded JSON, or the text when it is not JSON
 ---@field text string
 
+--- What a value is read from.
+---@class HandlerContext
+---@field response HandlerResponse|nil nil in a pre-request script
+---@field pending table<string, { value: any, secret: boolean }> Variables set by the scripts so far, not saved yet
+
 -- The object whose `set(key, value)` and `secret(key, value)` set an environment variable
 local setter = "client.global"
+-- The object whose `set(name, value)` sets a header of the request, before it is sent
+local header_setter = "request.headers"
 
 local escapes = { n = "\n", t = "\t", r = "\r" }
 
@@ -83,9 +100,10 @@ local function split_top(s, i, separator)
     return parts, i + 1
 end
 
---- Every `client.global.set("key", expression)` and `client.global.secret(...)` call in the script.
+--- Every `client.global.set("key", expression)`, `client.global.secret(...)` and
+--- `request.headers.set("Name", expression)` call in the script, in order.
 ---@param script string[]
----@return { key: string, expr: string, secret: boolean }[] calls, string[] errors
+---@return { key: string, expr: string, secret: boolean, header: boolean }[] calls, string[] errors
 local function parse_set_calls(script)
     local text = table.concat(script, "\n")
     local calls, errors = {}, {}
@@ -95,7 +113,8 @@ local function parse_set_calls(script)
         if not start then
             break
         end
-        if not (owner == setter and (method == "set" or method == "secret")) then
+        local header = owner == header_setter and method == "set"
+        if not (header or owner == setter and (method == "set" or method == "secret")) then
             -- Not a setter: look inside its arguments too
             pos = finish + 1
         else
@@ -107,7 +126,7 @@ local function parse_set_calls(script)
                 table.insert(errors, owner .. "." .. method .. "(" .. table.concat(args, ", ") ..
                     "): expected a string key and a value")
             else
-                table.insert(calls, { key = key, expr = args[2], secret = method == "secret" })
+                table.insert(calls, { key = key, expr = args[2], secret = method == "secret", header = header })
             end
         end
     end
@@ -153,6 +172,32 @@ end
 
 local eval
 
+math.randomseed(vim.uv.hrtime())
+
+--- A random version 4 UUID.
+---@return string
+local function uuid()
+    return (("xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"):gsub("[xy]", function(c)
+        local n = math.random(0, 15)
+        return ("%x"):format(c == "x" and n or 8 + n % 4)
+    end))
+end
+
+-- Values made anew each time: the JetBrains dynamic variables
+local dynamic = {
+    ["$uuid"] = uuid,
+    ["$random.uuid"] = uuid,
+    ["$timestamp"] = function()
+        return os.time()
+    end,
+    ["$isoTimestamp"] = function()
+        return os.date("!%Y-%m-%dT%H:%M:%SZ")
+    end,
+    ["$randomInt"] = function()
+        return math.random(0, 1000)
+    end,
+}
+
 -- JavaScript's `encodeURIComponent` keeps these as is
 local function encode_uri_component(text)
     return (text:gsub("[^%w%-_%.!~%*'%(%)]", function(c)
@@ -167,12 +212,13 @@ local functions = {
 }
 
 ---@param term string
----@param response HandlerResponse
+---@param ctx HandlerContext
 ---@return any|nil value, string|nil err
-local function eval_term(term, response)
+local function eval_term(term, ctx)
+    local response = ctx.response
     local fn, arg = term:match("^(%a+)%((.*)%)$")
     if fn and functions[fn] then
-        local value, err = eval(arg, response)
+        local value, err = eval(arg, ctx)
         if value == nil then
             return nil, err
         end
@@ -188,10 +234,39 @@ local function eval_term(term, response)
     if term:match("^%-?%d+%.?%d*$") then
         return tonumber(term), nil
     end
+    if dynamic[term] then
+        return dynamic[term](), nil
+    end
+    local range = term:match("^%$random%.integer%((.*)%)$")
+    if range then
+        local parts = vim.tbl_filter(function(part)
+            return part ~= ""
+        end, split_top(range, 1, ","))
+        local from, to = tonumber(parts[1] or "0"), tonumber(parts[2] or "1000")
+        if #parts > 2 or not from or not to or math.floor(from) ~= from or math.floor(to) ~= to or from > to then
+            return nil, "expected $random.integer(from, to) with whole numbers"
+        end
+        return math.random(from, to), nil
+    end
+    local _, key = term:match("^client%.global%.get%(%s*([\"'])(.-)%1%s*%)$")
+    if key then
+        if ctx.pending[key] then
+            return ctx.pending[key].value, nil
+        end
+        local var = require("http-nvim.env").find(key)
+        if not var or var.enabled == false then
+            return nil, "variable '" .. key .. "' is not set"
+        end
+        return var.value, nil
+    end
+    if term:match("^response[%.%(]") and not response then
+        return nil, "no response yet in a pre-request script"
+    end
     if term == "response.status" then
         return response.status, nil
     end
-    local _, name = term:match("^response%.headers%.valueOf%(%s*([\"'])(.-)%1%s*%)$")
+    local name
+    _, name = term:match("^response%.headers%.valueOf%(%s*([\"'])(.-)%1%s*%)$")
     if name then
         local value = response.headers[name:lower()]
         if not value then
@@ -220,13 +295,13 @@ end
 
 --- A single term keeps its type (e.g. an object); joined terms make a string.
 ---@param expr string
----@param response HandlerResponse
+---@param ctx HandlerContext
 ---@return any|nil value, string|nil err
-eval = function(expr, response)
+eval = function(expr, ctx)
     local terms = split_top(expr, 1, "+")
     local values = {}
     for _, term in ipairs(terms) do
-        local value, err = eval_term(term, response)
+        local value, err = eval_term(term, ctx)
         if value == nil then
             return nil, err
         end
@@ -272,29 +347,51 @@ local function parse_cookies(header_lines)
     return cookies
 end
 
---- Run the script's `set` calls against the response and save the variables they set.
----@param script string[]
----@param response HandlerResponse
-local function run(script, response)
-    local calls, errors = parse_set_calls(script)
-    local vars = {}
-    for _, call in ipairs(calls) do
-        local value, err = eval(call.expr, response)
-        if value == nil then
-            table.insert(errors, call.key .. ": " .. err)
-        else
-            table.insert(vars, { key = call.key, value = value, secret = call.secret })
+--- Run the scripts' `set` calls in order, before a request (`response` nil) or
+--- after its response, and save the variables they set. A later script reads
+--- with `client.global.get` what an earlier one set. Before a request, the
+--- headers set with `request.headers.set` come back, in order, for the caller to send.
+---@param scripts string[][]
+---@param response HandlerResponse|nil
+---@return { key: string, value: string }[] headers
+local function run(scripts, response)
+    ---@type HandlerContext
+    local ctx = { response = response, pending = {} }
+    local order, errors, headers = {}, {}, {}
+    for _, script in ipairs(scripts) do
+        local calls, parse_errors = parse_set_calls(script)
+        vim.list_extend(errors, parse_errors)
+        for _, call in ipairs(calls) do
+            local value, err
+            if call.header and response then
+                err = "request.headers.set only works in a pre-request script"
+            else
+                value, err = eval(call.expr, ctx)
+            end
+            if value == nil then
+                table.insert(errors, call.key .. ": " .. err)
+            elseif call.header then
+                table.insert(headers, { key = call.key, value = type(value) == "table" and vim.json.encode(value) or value })
+            else
+                local previous = ctx.pending[call.key]
+                if not previous then
+                    table.insert(order, call.key)
+                end
+                ctx.pending[call.key] = { value = value, secret = call.secret or (previous and previous.secret) or false }
+            end
         end
     end
-    if #vars > 0 then
-        require("http-nvim.env").set_vars(vars)
-        vim.notify("http-nvim: set " .. table.concat(vim.tbl_map(function(var)
-            return var.key
-        end, vars), ", "))
+    if #order > 0 then
+        require("http-nvim.env").set_vars(vim.tbl_map(function(key)
+            return { key = key, value = ctx.pending[key].value, secret = ctx.pending[key].secret }
+        end, order))
+        vim.notify("http-nvim: set " .. table.concat(order, ", "))
     end
     if #errors > 0 then
-        vim.notify("http-nvim: response handler: " .. table.concat(errors, "; "), vim.log.levels.WARN)
+        vim.notify("http-nvim: " .. (response and "response handler" or "pre-request script") .. ": " ..
+            table.concat(errors, "; "), vim.log.levels.WARN)
     end
+    return headers
 end
 
 return {

@@ -71,6 +71,7 @@ require("http-nvim").setup({
         help = "g?",
         toggle = { "<CR>", "=" },
         edit = "e",
+        edit_scripts = "S",
         rename = "r",
         add = "a",
         delete = "D",
@@ -138,7 +139,21 @@ Content-Type: application/json
 %}
 ```
 
-In an edit buffer, a built-in language server completes `{{key}}` with the environment variables, the method, header names and common values, cookie names from the collection's jar (in a `Cookie:` header and in `response.cookiesByName("")`), and the response handler API inside `> {% %}`. `K` on a `{{key}}` shows its value (masked when secret), or that it is disabled or not set. A completion plugin shows it like any LSP source; without one, use `<C-x><C-o>` or set `lsp = { autotrigger = true }`.
+A pre-request script, `< {% %}` after the `### name` line, runs before the request is sent, so the request can use the variables it sets. It can't read `response.*`, but it can set headers of the request with `request.headers.set("Name", value)` (replacing a header of that name, like Postman's `pm.request.headers.upsert()`, only for this send), and use `client.global.get("key")` and the dynamic values `$uuid`, `$timestamp`, `$isoTimestamp`, `$randomInt` and `$random.integer(from, to)`, which response handlers can use too:
+
+```http
+### create order
+< {%
+  client.global.set("order_id", $uuid)
+  request.headers.set("X-XSRF-TOKEN", client.global.get("xsrf"))
+%}
+POST {{url}}/orders
+Idempotency-Key: {{order_id}}
+```
+
+The collection and each folder can have both kinds of script too, run around every request inside them, like Postman's collection and folder scripts. Press `S` on a folder in the panel, or on the "Collection scripts" line, to edit them. When sending, the pre-request scripts run from the collection's, then each folder's, down to the request's own, and after the response the handlers run in the same order. See `:h http-nvim-scripts`.
+
+In an edit buffer, a built-in language server completes `{{key}}` with the environment variables, the method, header names and common values, cookie names from the collection's jar (in a `Cookie:` header and in `response.cookiesByName("")`), the script API inside `< {% %}` and `> {% %}`, and variable names in `client.global.get("")`. `K` on a `{{key}}` shows its value (masked when secret), or that it is disabled or not set. A completion plugin shows it like any LSP source; without one, use `<C-x><C-o>` or set `lsp = { autotrigger = true }`.
 
 Press `e` on the environment variables in the panel to edit them as `KEY=value` lines, like a `.env` file. `# KEY=value` is a disabled variable, which `{{key}}` doesn't use. `KEY=value # secret` marks a secret variable (Postman type `secret`), whose value the panel shows as `********`.
 
@@ -163,7 +178,8 @@ Press `e` on the environment variables in the panel to edit them as `KEY=value` 
 | `<leader>hrr` | `send` | Send the request (panel, edit buffer) |
 | `g?` | `help` | Open the help |
 | `<CR>` `=` | `toggle` | Expand or collapse a folder |
-| `e` | `edit` | Edit a request or the variables |
+| `e` | `edit` | Edit a request, the variables or the collection's scripts |
+| `S` | `edit_scripts` | Edit the scripts of the collection or folder |
 | `r` | `rename` | Rename a request or folder |
 | `a` | `add` | Add a request or folder (`a/b/name` also creates the folders) |
 | `D` | `delete` | Delete a request or folder |

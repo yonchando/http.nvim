@@ -13,12 +13,17 @@ local state = require("http-nvim.state")
 ---@field name string
 ---@field item PostmanItem[]|nil
 ---@field request PostmanRequest|string|nil
----@field event { listen: string, script: { type: string, exec: string[]|string } }[]|nil Postman scripts; the `test` one is the response handler
+---@field event PostmanEvent[]|nil Postman scripts: `prerequest` runs before a request, `test` after its response
+
+---@class PostmanEvent
+---@field listen string `prerequest` or `test`
+---@field script { type: string, exec: string[]|string }
 
 --- Postman collection format v2.1.
 ---@class PostmanCollection
 ---@field info { name: string, schema: string|nil }
 ---@field item PostmanItem[]
+---@field event PostmanEvent[]|nil Scripts run around every request of the collection
 
 ---@class DeletedItem
 ---@field list PostmanItem[]|nil The list it was removed from; nil when loaded from the undo file
@@ -186,6 +191,31 @@ local function locate(node)
     return search(state.items, "")
 end
 
+--- The collection and the folders that hold `node`, outermost first: their
+--- scripts run around it. Just the collection when `node` is not in it.
+---@param node PostmanItem
+---@return (PostmanCollection|PostmanItem)[]
+local function ancestors(node)
+    if not state.collection then
+        return {}
+    end
+    local function search(list, path)
+        for _, item in ipairs(list) do
+            if item == node then
+                return path
+            end
+            if item.item then
+                table.insert(path, item)
+                if search(item.item, path) then
+                    return path
+                end
+                table.remove(path)
+            end
+        end
+    end
+    return search(state.items, { state.collection }) or { state.collection }
+end
+
 --- `name`, or `name copy`, `name copy 2`, ... when `list` already has it.
 ---@param list PostmanItem[]
 ---@param name string
@@ -256,6 +286,7 @@ return {
     resolve_parent = resolve_parent,
     count_requests = count_requests,
     locate = locate,
+    ancestors = ancestors,
     unique_name = unique_name,
     split_path = split_path,
     ensure_folders = ensure_folders,

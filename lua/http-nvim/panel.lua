@@ -22,11 +22,22 @@ local unique_name = collection.unique_name
 local split_path = collection.split_path
 local ensure_folders = collection.ensure_folders
 local edit = request_edit.edit
+local edit_scripts_at_cursor = request_edit.edit_scripts_at_cursor
 local edit_bufs_under = request_edit.edit_bufs_under
 local rename_edit_bufs = request_edit.rename_edit_bufs
 local load_env = env.load_env
 local env_line = env.env_line
 local send_request = request.send_request
+
+-- After the name of a folder or request that has scripts of its own
+local script_mark = " ƒ"
+
+--- How many of the item's scripts are set: `prerequest` and `test`.
+---@param item PostmanCollection|PostmanItem
+---@return integer
+local function count_scripts(item)
+    return (jetbrains.script_of(item, "prerequest") and 1 or 0) + (jetbrains.script_of(item, "test") and 1 or 0)
+end
 
 ---@param nodes PostmanItem[]
 ---@param depth integer
@@ -36,16 +47,17 @@ local function render_items(nodes, depth, lines, parent_path)
     for _, node in ipairs(nodes) do
         local path = parent_path .. "/" .. node.name
         local indent = string.rep("  ", depth)
+        local mark = count_scripts(node) > 0 and script_mark or ""
         if node.request then
             -- `request` may be a bare URL string; Postman defaults the method to GET
             local method = type(node.request) == "table" and node.request.method or "GET"
-            table.insert(lines, indent .. "  " .. method .. " " .. node.name)
+            table.insert(lines, indent .. "  " .. method .. " " .. node.name .. mark)
         else
             local marker = "  "
             if node.item and #node.item > 0 then
                 marker = state.expanded[node] and "▾ " or "▸ "
             end
-            table.insert(lines, indent .. marker .. "(" .. count_requests(node) .. ") " .. node.name)
+            table.insert(lines, indent .. marker .. "(" .. count_requests(node) .. ") " .. node.name .. mark)
         end
         state.line_nodes[#lines] = node
         state.line_paths[#lines] = path:sub(2)
@@ -66,8 +78,11 @@ local function render()
     local lines = {
         "Help: g?",
         "",
-        "Environment variables (" .. #state.env .. ")",
+        "Collection scripts (" .. count_scripts(state.collection) .. ")",
     }
+    state.line_scripts = { [#lines] = true }
+    table.insert(lines, "")
+    table.insert(lines, "Environment variables (" .. #state.env .. ")")
     state.line_env = { [#lines] = "" }
     for _, var in ipairs(state.env) do
         table.insert(lines, env_line(var, " = ", true))
@@ -418,7 +433,7 @@ end
 local function make_request()
     local node = state.line_nodes[vim.api.nvim_win_get_cursor(0)[1]]
     if node and node.request then
-        send_request(node.request, jetbrains.script_of(node), node)
+        send_request(node.request, request.scripts_for(node), node)
     end
 end
 
@@ -496,6 +511,7 @@ local function open()
     keymaps.map("move_down", function() move_sibling(1) end, bufnr)
     keymaps.map("move_up", function() move_sibling(-1) end, bufnr)
     keymaps.map("edit", edit, bufnr)
+    keymaps.map("edit_scripts", edit_scripts_at_cursor, bufnr)
     keymaps.map("send", make_request, bufnr)
     keymaps.map("rename", rename_item, bufnr)
     keymaps.map("delete", delete_item, bufnr)

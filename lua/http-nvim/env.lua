@@ -208,5 +208,6 @@ return {
     env_line = env_line,
     parse_env_lines = parse_env_lines,
     set_vars = set_vars,
+    find = find,
     expand_env = expand_env,
 }

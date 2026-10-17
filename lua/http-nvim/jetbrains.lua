@@ -1,6 +1,9 @@
 -- Convert Postman requests to and from the JetBrains HTTP Client format:
 --
 --   ### name
+--   < {%
+--     client.global.set("nonce", $uuid)
+--   %}
 --   POST {{url}}/v1/login
 --   Content-Type: application/json
 --   # or // X-Disabled: header
@@ -24,35 +27,98 @@ local fields_source = [[
 (request (res_handler_script) @handler)
 ]]
 
---- Lines of the item's response handler script: the `exec` of its Postman `test` event.
----@param item PostmanItem
+--- Lines of a script's `exec`, or nil when there is none.
+---@param item PostmanItem|PostmanCollection
+---@param listen string|nil `test` (the response handler, the default) or `prerequest`
 ---@return string[]|nil
-M.script_of = function(item)
+M.script_of = function(item, listen)
+    listen = listen or "test"
     for _, event in ipairs(item.event or {}) do
-        if event.listen == "test" and event.script then
+        if event.listen == listen and event.script then
             local exec = event.script.exec
             if type(exec) == "string" then
                 exec = vim.split(exec, "\n", { plain = true })
             end
             if exec and #exec > 0 then
-                return exec
+                -- Postman exports keep the `\r` of Windows line ends
+                return vim.tbl_map(function(line)
+                    return (line:gsub("\r$", ""))
+                end, exec)
             end
         end
     end
 end
 
---- Store the response handler script as the item's Postman `test` event, or
---- remove that event when `script` is nil. Other events are kept.
----@param item PostmanItem
+--- Store a script as the item's Postman `listen` event, or remove that event
+--- when `script` is nil. Other events are kept.
+---@param item PostmanItem|PostmanCollection
 ---@param script string[]|nil
-M.set_script = function(item, script)
+---@param listen string|nil `test` (the response handler, the default) or `prerequest`
+M.set_script = function(item, script, listen)
+    listen = listen or "test"
     local events = vim.tbl_filter(function(event)
-        return event.listen ~= "test"
+        return event.listen ~= listen
     end, item.event or {})
     if script then
-        table.insert(events, { listen = "test", script = { type = "text/javascript", exec = script } })
+        table.insert(events, { listen = listen, script = { type = "text/javascript", exec = script } })
     end
     item.event = #events > 0 and events or nil
+end
+
+--- `lines` without the blank lines at both ends, or nil when nothing is left.
+---@param lines string[]
+---@return string[]|nil
+local function trim_blank(lines)
+    lines = vim.deepcopy(lines)
+    while #lines > 0 and lines[1]:match("^%s*$") do
+        table.remove(lines, 1)
+    end
+    while #lines > 0 and lines[#lines]:match("^%s*$") do
+        table.remove(lines)
+    end
+    return #lines > 0 and lines or nil
+end
+
+--- The `< {% %}` (pre-request) and `> {% %}` (response handler) scripts in
+--- `lines[from..to]`, one-line ones too. A script that is empty comes back as nil.
+---@param lines string[]
+---@param from integer 1-based
+---@param to integer 1-based, inclusive
+---@return { prerequest: string[]|nil, test: string[]|nil }|nil scripts, string|nil err
+---@return integer|nil stray First line outside a script that is neither blank nor a comment
+M.script_blocks = function(lines, from, to)
+    local scripts, stray = {}, nil
+    local i = from
+    while i <= to do
+        local mark, rest = lines[i]:match("^%s*([<>])%s*{%%(.*)$")
+        if mark then
+            local listen = mark == "<" and "prerequest" or "test"
+            local body = {}
+            local inner = rest:match("^(.-)%%}%s*$")
+            if inner then
+                table.insert(body, vim.trim(inner))
+            else
+                local start = i
+                table.insert(body, rest)
+                i = i + 1
+                while i <= to and not lines[i]:find("%}", 1, true) do
+                    table.insert(body, lines[i])
+                    i = i + 1
+                end
+                if i > to then
+                    return nil, "line " .. start .. ": '" .. mark .. " {%' is not closed with '%}'"
+                end
+                table.insert(body, lines[i]:match("^(.-)%%}"))
+            end
+            scripts[listen] = vim.list_extend(scripts[listen] or {}, body)
+        elseif not (lines[i]:match("^%s*$") or lines[i]:match("^%s*#") or lines[i]:match("^%s*//")) then
+            stray = stray or i
+        end
+        i = i + 1
+    end
+    scripts.prerequest = scripts.prerequest and trim_blank(scripts.prerequest)
+    scripts.test = scripts.test and trim_blank(scripts.test)
+    return scripts, nil, stray
 end
 
 ---@param request PostmanRequest|string
@@ -68,13 +134,17 @@ end
 ---@param name string
 ---@param request PostmanRequest|string
 ---@param script string[]|nil Response handler script, written as `> {% ... %}`
+---@param pre_script string[]|nil Pre-request script, written as `< {% ... %}` before the request line
 ---@return string[]
-M.to_lines = function(name, request, script)
+M.to_lines = function(name, request, script, pre_script)
     local method = type(request) == "table" and request.method or "GET"
-    local lines = {
-        "### " .. name,
-        method .. " " .. M.url_of(request),
-    }
+    local lines = { "### " .. name }
+    if pre_script then
+        table.insert(lines, "< {%")
+        vim.list_extend(lines, pre_script)
+        table.insert(lines, "%}")
+    end
+    table.insert(lines, method .. " " .. M.url_of(request))
 
     if type(request) == "table" then
         for _, header in ipairs(request.header or {}) do
@@ -109,10 +179,16 @@ end
 --- Only the first `### name` section is read; other sections are ignored.
 ---@param lines string[]
 ---@param original PostmanRequest|string
---- The response handler script (`> {% ... %}`) comes back as its own lines.
----@return PostmanRequest|nil, string|nil, { name: string, start_row: integer, end_row: integer }|nil, string[]|nil Name and 0-based, end-exclusive line range of the section used, and the script
+--- The response handler script (`> {% ... %}`) and the pre-request script
+--- (`< {% ... %}`) come back as their own lines.
+---@return PostmanRequest|nil, string|nil, { name: string, start_row: integer, end_row: integer }|nil, string[]|nil, string[]|nil Name and 0-based, end-exclusive line range of the section used, the script and the pre-request script
 M.from_lines = function(lines, original)
-    local text = table.concat(lines, "\n") .. "\n"
+    -- The grammar breaks the section on a one-line `< {% ... %}`: parse without
+    -- it (keeping the rows), and read the pre-request script from the lines
+    local parsed = vim.tbl_map(function(line)
+        return line:match("^%s*<%s*{%%.*%%}%s*$") and "" or line
+    end, lines)
+    local text = table.concat(parsed, "\n") .. "\n"
     -- `query.parse` is memoized, so this only parses the queries once
     local ok, parser = pcall(vim.treesitter.get_string_parser, text, "http")
     if not ok then
@@ -145,6 +221,12 @@ M.from_lines = function(lines, original)
     if not request_node or not range or range.name == "" then
         return nil, "missing '### name' section with a request"
     end
+    -- Between `### name` and the request line
+    local pre_scripts, pre_err = M.script_blocks(lines, range.start_row + 2, (request_node:range()))
+    if not pre_scripts then
+        return nil, pre_err
+    end
+    local pre_script = pre_scripts.prerequest
 
     local method, url = "GET", nil
     local headers = {}
@@ -176,14 +258,7 @@ M.from_lines = function(lines, original)
             -- Read from the text: the grammar only parses a `{% %}` spanning several lines
             local inner = node_text:match("^>%s*{%%(.-)%%}%s*$")
             if inner then
-                script = vim.split(inner, "\n", { plain = true })
-                while #script > 0 and script[1]:match("^%s*$") do
-                    table.remove(script, 1)
-                end
-                while #script > 0 and script[#script]:match("^%s*$") do
-                    table.remove(script)
-                end
-                script = #script > 0 and script or nil
+                script = trim_blank(vim.split(inner, "\n", { plain = true }))
             end
         end
     end
@@ -205,7 +280,7 @@ M.from_lines = function(lines, original)
     local body = request.body
     if body and body.mode and body.mode ~= "raw" then
         -- Not representable in the HTTP format: leave the original body untouched
-        return request, nil, range, script
+        return request, nil, range, script, pre_script
     end
     if #body_lines > 0 then
         request.body = vim.tbl_extend("force", body or {}, { mode = "raw", raw = table.concat(body_lines, "\n") })
@@ -213,7 +288,7 @@ M.from_lines = function(lines, original)
         request.body = nil
     end
 
-    return request, nil, range, script
+    return request, nil, range, script, pre_script
 end
 
 return M

@@ -9,6 +9,7 @@ CONTENTS                                              *http-nvim-contents*
   4. Keymaps ......................... |http-nvim-keymaps|
   5. Highlights ...................... |http-nvim-highlights|
   6. Response handler ................ |http-nvim-response-handler|
+  7. Scripts ......................... |http-nvim-scripts|
 
 ==============================================================================
 1. INTRODUCTION                                          *http-nvim-intro*
@@ -25,6 +26,9 @@ browse, edit and send them without leaving Neovim.
   floating window.
 - Set environment variables from the response with a `> {% %}` response
   handler, see |http-nvim-response-handler|.
+- Set them before a request with a `< {% %}` pre-request script, and run
+  scripts around every request of the collection or a folder, see
+  |http-nvim-scripts|.
 
 Each collection lives in its own folder, holding `collection.json` (a
 Postman v2.1 collection) and `env.json` (a Postman environment), so both
@@ -79,8 +83,9 @@ lsp                 Completion in request edit buffers, from a language
                     values, cookie names from the collection's jar (as
                     `name=value` in a `Cookie:` header, and inside
                     `response.cookiesByName("")` or after
-                    `response.cookies().`), and the response handler API inside
-                    `> {% %}`. |K| (|vim.lsp.buf.hover()|) on a `{{key}}`
+                    `response.cookies().`), the script API inside
+                    `< {% %}` and `> {% %}` (in scripts buffers too),
+                    and variable names in `client.global.get("")`. |K| (|vim.lsp.buf.hover()|) on a `{{key}}`
                     shows its value, masked when secret, or that it
                     is disabled or not set. Completion plugins such as blink.cmp or
                     nvim-cmp pick it up as an LSP source; without one,
@@ -146,7 +151,10 @@ Panel keys work in the panel, and response keys in the layout that
   `send`              <leader>hrr   Send the request (panel, edit buffer)
   `help`              g?            Open this help
   `toggle`            <CR> and =    Expand or collapse a folder
-  `edit`              e             Edit a request or the variables
+  `edit`              e             Edit a request, the variables or the
+                                  collection's scripts
+  `edit_scripts`      S             Edit the scripts of the collection or
+                                  folder
   `rename`            r             Rename a request or folder
   `add`               a             Add a request or folder
   `delete`            D             Delete a request or folder
@@ -181,6 +189,11 @@ e                   Edit the request under the cursor as a `.http` file
                     variable, which `{{key}}` does not use, and
                     `KEY=value # secret` a secret one (Postman type
                     `secret`), whose value the panel masks.
+                    On "Collection scripts", edit them as S does.
+S                   Edit the scripts of the folder under the cursor, or
+                    of the collection on its "Collection scripts" line,
+                    see |http-nvim-scripts|. On a request, edit it as e
+                    does: its own scripts are in its edit buffer.
 r                   Rename the request or folder under the cursor.
 a                   Add a request or folder. `a/b/name` also creates the
                     folders `a/b`; `a/b/` adds only the folders.
@@ -221,6 +234,7 @@ vim-fugitive. Override any of them with |:highlight|.
   httpNvimFold         Expand/collapse marker `▸`/`▾`    links to Special
   httpNvimMethod       Request method, e.g. `GET`       links to Keyword
   httpNvimRequest      Request name                    not linked
+  httpNvimScriptMark   `ƒ` after an item with scripts    links to Special
   httpNvimCut          Item cut with |x|                underlined
   httpNvimCopy         Item copied with |y|             links to httpNvimCut
 
@@ -244,7 +258,9 @@ updated if it exists, and `env.json` is saved: >http
 <
 A one-line `> {% ... %}` works too. The script is saved with |:w| as the
 request's Postman `test` event, and runs when sending from the panel, the
-edit buffer or with `<leader>hre`.
+edit buffer or with `<leader>hre`. The collection and its folders can have
+response handlers too, run before the request's own, see
+|http-nvim-scripts|.
 
 Only the JetBrains HTTP Client API is supported, and there is no
 JavaScript engine: only `client.global.set("key", value)` and
@@ -271,9 +287,81 @@ The value is one or more terms joined with `+`:
                                     e.g. Laravel's `XSRF-TOKEN` cookie
   `encodeURIComponent(value)`       The value URL-encoded, as JavaScript
                                     does
+  `client.global.get("key")`        A variable: the environment's, or what
+                                    an earlier `set` of this send gave it
+  `$uuid`, `$random.uuid`           A random UUID (version 4)
+  `$timestamp`                      The Unix time, in seconds
+  `$isoTimestamp`                   The UTC time, e.g. `2026-10-17T09:30:00Z`
+  `$randomInt`                      A random integer from 0 to 1000
+  `$random.integer(from, to)`       A random integer from {from} to {to}
 
 A single term that is an object or list is stored as is; anything else is
 stored as text. A value that can't be read (e.g. a missing key) is reported
 and that variable is left unchanged.
+
+==============================================================================
+7. SCRIPTS                                           *http-nvim-scripts*
+
+A pre-request script, `< {% %}` between `### name` and the request line,
+runs before the request is sent, so `{{key}}` in the request gets the
+variables it sets: >http
+
+    ### create order
+    < {%
+      client.global.set("order_id", $uuid)
+    %}
+    POST {{url}}/orders
+    Idempotency-Key: {{order_id}}
+<
+It uses the same calls and values as a response handler
+(|http-nvim-response-handler|), except `response.*`, which is reported as
+an error since there is no response yet. It is saved with |:w| as the
+request's Postman `prerequest` event.
+
+A pre-request script can also set a header of the request, like Postman's
+`pm.request.headers.upsert()`: >http
+
+    < {%
+      request.headers.set("X-XSRF-TOKEN", client.global.get("xsrf"))
+      request.headers.set("Accept", "application/json")
+    %}
+<
+`request.headers.set("Name", value)` replaces the enabled headers of that
+name (the name is matched ignoring case), or else adds the header. The
+value is the same as for `set`, and `{{key}}` in it is replaced as in the
+request. The header only goes with this send: the saved request is left as
+it is. In a response handler, the call is reported and ignored.
+
+The collection and each folder can also have both kinds of script, run
+around every request inside them, like Postman's collection and folder
+scripts. Press `S` on a folder in the panel, or on the "Collection scripts"
+line (`e` works there too), to edit them in a buffer of their own: >http
+
+    # Before each request in 'auth': ...
+    < {%
+      client.global.set("request_id", $uuid)
+    %}
+
+    # After each response in 'auth', in the same order
+    > {%
+      client.global.set("last_status", response.status)
+    %}
+<
+|:w| saves them as the folder's (or the collection's) `prerequest` and
+`test` events; an empty block removes its event. The panel shows `ƒ` after
+an item that has scripts, and the number of the collection's scripts on
+its line.
+
+When a request is sent, the scripts run in this order:
+1. The pre-request scripts: the collection's, then each folder's from the
+   outermost, then the request's own.
+2. The request, with `{{key}}` replaced.
+3. The response handlers, in the same order: the collection's first, the
+   request's last.
+
+A header set by a later pre-request script replaces one set by an earlier
+script. Each step sees what the earlier ones set with `client.global.get()`, and
+the variables are saved to `env.json` at the end of each step. Postman
+scripts (`pm.*`) imported with a collection are kept, but do nothing here.
 
  vim:tw=78:ts=8:ft=help:norl:

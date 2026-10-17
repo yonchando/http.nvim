@@ -1,6 +1,7 @@
 --- Sending requests with curl and showing the response in a floating layout.
 local Layout = require("nui.layout")
 local Popup = require("nui.popup")
+local collection = require("http-nvim.collection")
 local config = require("http-nvim.config")
 local env = require("http-nvim.env")
 local handler = require("http-nvim.handler")
@@ -22,7 +23,7 @@ vim.api.nvim_set_hl(0, "httpNvimMethod", { link = "Keyword", default = true })
 --- What a sent request shows, kept so `<leader>hrp` can show it again.
 ---@class ResponseView
 ---@field request PostmanRequest|string The request as sent, before `{{key}}` replacement
----@field script string[]|nil Response handler script, run on each response
+---@field scripts RequestScripts|nil Scripts run around it, sent again with it
 ---@field node PostmanItem|nil The collection item it came from, re-read by `<leader>hre`
 ---@field request_line string
 ---@field status string
@@ -30,6 +31,37 @@ vim.api.nvim_set_hl(0, "httpNvimMethod", { link = "Keyword", default = true })
 ---@field content_filetype string
 ---@field sidebar_right string[]
 ---@field boxes ResponseBoxes[] Open layouts showing this view, filled in when the response arrives
+
+--- Scripts run around a request, in order.
+---@class RequestScripts
+---@field prerequest string[][] Before it is sent
+---@field test string[][] After its response
+
+--- The scripts around a request: the collection's, then each folder's from the
+--- outermost, then the request's own: `own`, or else the item's saved ones.
+---@param node PostmanItem|nil
+---@param own { prerequest: string[]|nil, test: string[]|nil }|nil
+---@return RequestScripts
+local function scripts_for(node, own)
+    own = own or (node and {
+        prerequest = jetbrains.script_of(node, "prerequest"),
+        test = jetbrains.script_of(node, "test"),
+    }) or {}
+    local scripts = { prerequest = {}, test = {} }
+    local owners = node and collection.ancestors(node) or {}
+    for listen, list in pairs(scripts) do
+        for _, owner in ipairs(owners) do
+            local script = jetbrains.script_of(owner, listen)
+            if script then
+                table.insert(list, script)
+            end
+        end
+        if own[listen] then
+            table.insert(list, own[listen])
+        end
+    end
+    return scripts
+end
 
 --- curl arguments for a request, with `{{key}}` replaced from the environment.
 --- Only a raw body is sent; other body modes are skipped.
@@ -170,18 +202,59 @@ local function show_view(view)
     end
 end
 
---- Send a request with curl and show it in a floating layout:
---- method, URL and status on top, the response below. Then run the response
---- handler script, if any, to set environment variables from the response.
+--- A copy of `request` with the headers a pre-request script set: each replaces
+--- the enabled headers of its name (case-insensitive), or else is added.
 ---@param request PostmanRequest|string
----@param script string[]|nil
+---@param headers { key: string, value: string }[]
+---@return PostmanRequest|string
+local function with_headers(request, headers)
+    if #headers == 0 then
+        return request
+    end
+    -- A bare URL string is a GET request
+    request = type(request) == "table" and vim.deepcopy(request) or { method = "GET", url = { raw = request } }
+    local list = request.header or {}
+    for _, header in ipairs(headers) do
+        local name = header.key:lower()
+        local replaced = false
+        list = vim.tbl_filter(function(existing)
+            if existing.disabled or existing.key:lower() ~= name then
+                return true
+            end
+            -- The first one keeps its place, the others go
+            if replaced then
+                return false
+            end
+            existing.value = header.value
+            replaced = true
+            return true
+        end, list)
+        if not replaced then
+            table.insert(list, { key = header.key, value = header.value })
+        end
+    end
+    request.header = list
+    return request
+end
+
+--- Send a request with curl and show it in a floating layout:
+--- method, URL and status on top, the response below. The pre-request scripts
+--- run first, so `{{key}}` gets the variables they set and the request the
+--- headers they set (only for this send); after the response,
+--- the response handlers set environment variables from it.
+---@param request PostmanRequest|string
+---@param scripts RequestScripts|nil See `scripts_for`
 ---@param node PostmanItem|nil The item the request comes from, so `run_last` can read it again
-local function send_request(request, script, node)
-    local args, method, url = curl_args(request)
+local function send_request(request, scripts, node)
+    local sent = request
+    if scripts and #scripts.prerequest > 0 then
+        sent = with_headers(request, handler.run(scripts.prerequest, nil))
+    end
+    local args, method, url = curl_args(sent)
     ---@type ResponseView
     local view = {
         request = request,
-        script = script,
+        scripts = scripts,
         node = node,
         request_line = method .. " " .. url,
         status = "Sending...",
@@ -218,8 +291,8 @@ local function send_request(request, script, node)
         view.content = vim.split((response:gsub("\r\n", "\n")), "\n", { plain = true })
         show_view(view)
 
-        if script then
-            handler.run(script, {
+        if scripts and #scripts.test > 0 then
+            handler.run(scripts.test, {
                 status = tonumber(status),
                 headers = handler.parse_headers(headers),
                 cookies = handler.parse_cookies(headers),
@@ -257,24 +330,26 @@ local function run_last()
     end
     local node = view.node
     if not node or not node.request then
-        send_request(view.request, view.script)
+        send_request(view.request, view.scripts)
         return
     end
     local bufnr = state.edit_bufs[node]
     if bufnr and vim.api.nvim_buf_is_loaded(bufnr) then
-        local request, err, _, script = jetbrains.from_lines(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), node.request)
+        local request, err, _, script, pre_script = jetbrains.from_lines(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false),
+            node.request)
         if not request then
             vim.notify("http-nvim: " .. err, vim.log.levels.ERROR)
             return
         end
-        send_request(request, script, node)
+        send_request(request, scripts_for(node, { prerequest = pre_script, test = script }), node)
         return
     end
-    send_request(node.request, jetbrains.script_of(node), node)
+    send_request(node.request, scripts_for(node), node)
 end
 
 return {
     send_request = send_request,
+    scripts_for = scripts_for,
     preview_last = preview_last,
     run_last = run_last,
 }
