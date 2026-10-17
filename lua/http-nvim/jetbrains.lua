@@ -174,6 +174,44 @@ M.to_lines = function(name, request, script, pre_script)
     return lines
 end
 
+--- 1-based rows of the first section's request line and of its headers (from
+--- the line after it to the last one before a blank line, a `<`/`>` line or the
+--- next `###`). Nil when there is no request line.
+---@param lines string[]
+---@return integer|nil request, integer|nil first, integer|nil last `last` < `first` when there are no headers
+local function header_rows(lines)
+    local i = 1
+    while i <= #lines and not lines[i]:match("^###") do
+        i = i + 1
+    end
+    i = i + 1
+    local in_script = false
+    while i <= #lines do
+        local text = vim.trim(lines[i])
+        if lines[i]:match("^###") then
+            return nil
+        elseif in_script then
+            in_script = not lines[i]:find("%}", 1, true)
+        elseif text:match("^<%s*{%%") then
+            in_script = not text:match("%%}$")
+        elseif text ~= "" and not text:match("^#") and not text:match("^//") then
+            break
+        end
+        i = i + 1
+    end
+    if i > #lines then
+        return nil
+    end
+    local last = i
+    for j = i + 1, #lines do
+        if vim.trim(lines[j]) == "" or lines[j]:match("^###") or lines[j]:match("^%s*[<>]") then
+            break
+        end
+        last = j
+    end
+    return i, i + 1, last
+end
+
 --- Parse lines written by `to_lines` back into a Postman request, keeping the
 --- fields the HTTP format cannot express from `original`.
 --- Only the first `### name` section is read; other sections are ignored.
@@ -188,6 +226,22 @@ M.from_lines = function(lines, original)
     local parsed = vim.tbl_map(function(line)
         return line:match("^%s*<%s*{%%.*%%}%s*$") and "" or line
     end, lines)
+    -- It also ends the request at a header without `:` or without a value:
+    -- refuse the first, and give the second a stand-in value to parse
+    local empty_values = {}
+    local _, first_header, last_header = header_rows(lines)
+    for i = first_header or 1, first_header and last_header or 0 do
+        local line = vim.trim(lines[i])
+        if not (line:match("^#") or line:match("^//")) then
+            if not line:match("^[^:%s][^:]*:") then
+                return nil, ("line %d: '%s' is not a header: write 'Name: value', or leave a blank line before the body")
+                    :format(i, line)
+            elseif line:match(":$") then
+                parsed[i] = lines[i] .. " _"
+                empty_values[i - 1] = true
+            end
+        end
+    end
     local text = table.concat(parsed, "\n") .. "\n"
     -- `query.parse` is memoized, so this only parses the queries once
     local ok, parser = pcall(vim.treesitter.get_string_parser, text, "http")
@@ -221,6 +275,16 @@ M.from_lines = function(lines, original)
     if not request_node or not range or range.name == "" then
         return nil, "missing '### name' section with a request"
     end
+    -- Anything the grammar left out of the section (up to the next `###`) would be
+    -- lost when saving drops the other sections: refuse instead
+    for i = range.end_row + 1, #lines do
+        if lines[i]:match("^###") then
+            break
+        end
+        if vim.trim(lines[i]) ~= "" then
+            return nil, ("line %d: can't read '%s' as part of the request '%s'"):format(i, vim.trim(lines[i]), range.name)
+        end
+    end
     -- Between `### name` and the request line
     local pre_scripts, pre_err = M.script_blocks(lines, range.start_row + 2, (request_node:range()))
     if not pre_scripts then
@@ -244,7 +308,8 @@ M.from_lines = function(lines, original)
             local value = node:field("value")[1]
             table.insert(headers, {
                 key = vim.trim(vim.treesitter.get_node_text(key, text)),
-                value = value and vim.trim(vim.treesitter.get_node_text(value, text)) or "",
+                value = value and not empty_values[(node:range())] and vim.trim(vim.treesitter.get_node_text(value, text))
+                    or "",
             })
         elseif capture == "comment" then
             -- `# Key: value` comments are disabled headers

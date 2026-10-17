@@ -5,6 +5,7 @@ local collection = require("http-nvim.collection")
 local config = require("http-nvim.config")
 local env = require("http-nvim.env")
 local handler = require("http-nvim.handler")
+local json = require("http-nvim.json")
 local jetbrains = require("http-nvim.jetbrains")
 local keymaps = require("http-nvim.keymaps")
 local state = require("http-nvim.state")
@@ -66,9 +67,10 @@ end
 --- curl arguments for a request, with `{{key}}` replaced from the environment.
 --- Only a raw body is sent; other body modes are skipped.
 ---@param request PostmanRequest|string
----@return string[] args, string method, string url
+---@return string[] args, string method, string url, string|nil body The body as sent
 local function curl_args(request)
     local method = type(request) == "table" and request.method or "GET"
+    local sent_body
     -- Postman URLs may hold spaces and `[]` (e.g. `?q=["a", "b"]`): encode the spaces, and
     -- `--globoff` stops curl reading `[...]` as a range
     local url = expand_env(jetbrains.url_of(request)):gsub(" ", "%%20")
@@ -90,13 +92,68 @@ local function curl_args(request)
         end
         local body = request.body
         if body and body.mode == "raw" and body.raw and body.raw ~= "" then
+            sent_body = expand_env(body.raw)
             table.insert(args, "--data-binary")
-            table.insert(args, expand_env(body.raw))
+            table.insert(args, sent_body)
         end
     end
     table.insert(args, "--")
     table.insert(args, url)
-    return args, method, url
+    return args, method, url, sent_body
+end
+
+--- Warn when the request says its body is JSON (`Content-Type: application/json`
+--- or `...+json`) but the body as sent does not parse: servers then read no body.
+---@param args string[] From `curl_args`
+---@param body string|nil
+local function check_json_body(args, body)
+    if not body or vim.trim(body) == "" then
+        return
+    end
+    local content_type
+    for i, arg in ipairs(args) do
+        if arg == "--header" then
+            local name, value = (args[i + 1] or ""):match("^([^:]+):%s*(.*)$")
+            if name and vim.trim(name):lower() == "content-type" then
+                content_type = value:lower()
+            end
+        end
+    end
+    -- The media type, without parameters such as `; charset=utf-8`
+    if not content_type or not vim.trim(content_type:match("^[^;]*")):match("[/+]json$") then
+        return
+    end
+    local err = json.first_error(json.check(body))
+    if err then
+        local line, col = json.position(body, err.s)
+        vim.notify(("http-nvim: the body is not valid JSON, though Content-Type is %s: line %d, column %d: %s")
+            :format(content_type, line + 1, col + 1, err.message), vim.log.levels.WARN)
+    end
+end
+
+--- Put the body as sent below the request headers (the first `> ` block): curl's
+--- `--verbose` only says how many bytes it sent.
+---@param headers string[] From `split_verbose`
+---@param body string|nil
+---@return string[]
+local function with_sent_body(headers, body)
+    if not body or body == "" then
+        return headers
+    end
+    local lines = vim.split((body:gsub("\r\n", "\n")), "\n", { plain = true })
+    local at = 0
+    for i, line in ipairs(headers) do
+        if line:sub(1, 2) ~= "> " then
+            break
+        end
+        at = i
+    end
+    local out = vim.list_slice(headers, 1, at)
+    table.insert(out, ">")
+    for _, line in ipairs(lines) do
+        table.insert(out, "> " .. line)
+    end
+    return vim.list_extend(out, headers, at + 1)
 end
 
 --- Split curl's `--verbose` stderr into the request and response headers (`> ` and
@@ -163,8 +220,8 @@ local function open_response_layout()
         Layout.Box({
             Layout.Box(header, { size = "10%" }),
             Layout.Box({
-                Layout.Box(content, { size = "70%" }),
-                Layout.Box(sidebar_right, { size = "30%" }),
+                Layout.Box(content, { size = "60%" }),
+                Layout.Box(sidebar_right, { size = "40%" }),
             }, { dir = "row", size = "90%" }),
         }, { dir = "col" })
     )
@@ -250,7 +307,8 @@ local function send_request(request, scripts, node)
     if scripts and #scripts.prerequest > 0 then
         sent = with_headers(request, handler.run(scripts.prerequest, nil))
     end
-    local args, method, url = curl_args(sent)
+    local args, method, url, body = curl_args(sent)
+    check_json_body(args, body)
     ---@type ResponseView
     local view = {
         request = request,
@@ -270,7 +328,7 @@ local function send_request(request, scripts, node)
     vim.system(args, { text = true }, vim.schedule_wrap(function(result)
         local elapsed = string.format("%d ms", (vim.uv.hrtime() - started) / 1e6)
         local headers, others = split_verbose(result.stderr or "")
-        view.sidebar_right = headers
+        view.sidebar_right = with_sent_body(headers, body)
         if result.code ~= 0 then
             view.status = "curl failed (exit " .. result.code .. ") " .. elapsed
             view.content = others

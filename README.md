@@ -5,7 +5,7 @@ Keep your API requests in Postman collections and browse, edit and send them wit
 - Browse a collection's folders and requests in a side panel
 - Edit a request as a `.http` file (JetBrains HTTP Client format) and save it back to the collection
 - Keep environment variables per collection and use them in requests as `{{key}}`
-- Send a request with curl and see the status, response and headers in a floating window
+- Send a request with curl and see the status, response and headers in a floating window, with the body as sent below the request headers (and a warning when a JSON body doesn't parse)
 
 > [!CAUTION]
 > **Breaking changes.** This is a rewrite. Requests now live in Postman collections browsed from a panel, instead of being run from any `.http` file. The `:HttpRun`, `:HttpResult`, `:HttpRerun`, `:HttpClose` and `:HttpHistory` commands are gone, and so are `http.last_result` and the old keymaps.
@@ -91,6 +91,8 @@ require("http-nvim").setup({
     -- autotrigger opens Neovim's own completion menu while typing; leave it off
     -- with a completion plugin (blink.cmp, nvim-cmp), which picks the server up itself.
     lsp = { autotrigger = false },
+    -- Format the JSON body (one key per line, by 'shiftwidth') when an edit buffer is saved
+    format_on_save = true,
 })
 ```
 
@@ -156,6 +158,8 @@ Dynamic variables make a new value each time, in a script (`$random.email`) or a
 The collection and each folder can have both kinds of script too, run around every request inside them, like Postman's collection and folder scripts. Press `S` on a folder in the panel, or on the "Collection scripts" line, to edit them. When sending, the pre-request scripts run from the collection's, then each folder's, down to the request's own, and after the response the handlers run in the same order. See `:h http-nvim-scripts`.
 
 In an edit buffer, a built-in language server completes `{{key}}` with the environment variables, the method, header names and common values, cookie names from the collection's jar (in a `Cookie:` header and in `response.cookiesByName("")`), the script API inside `< {% %}` and `> {% %}`, and variable names in `client.global.get("")`. `K` on a `{{key}}` shows its value (masked when secret), or that it is disabled or not set. A completion plugin shows it like any LSP source; without one, use `<C-x><C-o>` or set `lsp = { autotrigger = true }`.
+
+The language server also checks a JSON body as you type (a trailing comma, an unquoted key, a missing `,`; warnings for comments and duplicate keys) and formats it with `vim.lsp.buf.format()` or your format-on-save, keeping the key order and comments. `{{key}}` counts as a value even outside quotes (`"id": {{id}}`).
 
 Press `e` on the environment variables in the panel to edit them as `KEY=value` lines, like a `.env` file. `# KEY=value` is a disabled variable, which `{{key}}` doesn't use. `KEY=value # secret` marks a secret variable (Postman type `secret`), whose value the panel shows as `********`.
 

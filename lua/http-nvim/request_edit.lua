@@ -92,6 +92,15 @@ local function open_edit_window()
     })
 end
 
+--- Fire `BufWritePre` or `BufWritePost` for an edit buffer. Its `BufWriteCmd`
+--- replaces Vim's own write, which then skips both, so without this
+--- format-on-save (e.g. conform.nvim) and other write hooks would not run.
+---@param bufnr integer
+---@param event "BufWritePre"|"BufWritePost"
+local function fire_write(bufnr, event)
+    vim.api.nvim_exec_autocmds(event, { buffer = bufnr, modeline = false })
+end
+
 --- A new listed `acwrite` buffer named `name`. A leftover buffer of that name
 --- that isn't a tracked edit buffer is wiped first. Returns nil, after a message,
 --- when the name is taken: setting it would fail and leave a nameless buffer
@@ -163,6 +172,7 @@ local function edit_env()
         vim.api.nvim_create_autocmd("BufWriteCmd", {
             buffer = bufnr,
             callback = function()
+                fire_write(bufnr, "BufWritePre")
                 local values, err = parse_env_lines(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
                 if not values then
                     vim.notify("http-nvim: " .. err, vim.log.levels.ERROR)
@@ -176,6 +186,7 @@ local function edit_env()
                     return
                 end
                 vim.bo[bufnr].modified = false
+                fire_write(bufnr, "BufWritePost")
                 if state.split and state.split.bufnr and vim.api.nvim_buf_is_valid(state.split.bufnr) then
                     render()
                 end
@@ -194,6 +205,96 @@ local function edit_env()
             end
         end
     end
+end
+
+local scripts_ns = vim.api.nvim_create_namespace("http-nvim-scripts")
+vim.api.nvim_set_hl(0, "httpNvimScriptsMarker", { link = "PreProc", default = true })
+vim.api.nvim_set_hl(0, "httpNvimScriptsComment", { link = "Comment", default = true })
+
+--- Where the code of each `< {% %}` / `> {% %}` block is (one tree-sitter
+--- region each), and the markers and `#` comment lines around them.
+---@param lines string[]
+---@return Range4[][] regions, Range4[] markers, Range4[] comments 0-based, end-exclusive columns
+local function script_regions(lines)
+    local regions, markers, comments = {}, {}, {}
+    local i = 1
+    while i <= #lines do
+        local line = lines[i]
+        local _, open_end = line:find("^%s*[<>]%s*{%%")
+        if open_end then
+            table.insert(markers, { i - 1, 0, i - 1, open_end })
+            local close = line:find("%}", open_end + 1, true)
+            if close then
+                table.insert(regions, { { i - 1, open_end, i - 1, close - 1 } })
+                table.insert(markers, { i - 1, close - 1, i - 1, close + 1 })
+            else
+                local start = i
+                i = i + 1
+                while i <= #lines and not lines[i]:find("%}", 1, true) do
+                    i = i + 1
+                end
+                if i <= #lines then
+                    close = lines[i]:find("%}", 1, true)
+                    table.insert(regions, { { start, 0, i - 1, close - 1 } })
+                    table.insert(markers, { i - 1, close - 1, i - 1, close + 1 })
+                else
+                    -- Not closed yet: up to the end of the buffer
+                    table.insert(regions, { { start, 0, #lines - 1, #lines[#lines] } })
+                end
+            end
+        elseif line:match("^%s*#") then
+            table.insert(comments, { i - 1, 0, i - 1, #line })
+        end
+        i = i + 1
+    end
+    return regions, markers, comments
+end
+
+--- Highlight a scripts buffer: the http grammar only reads a `> {% %}` block
+--- after a request line, so tree-sitter JavaScript parses the code of the
+--- blocks instead (kept in step with edits), and extmarks mark the rest.
+--- Without a JavaScript parser, `syntax/http-nvim-scripts.vim` does it.
+---@param bufnr integer
+local function highlight_scripts(bufnr)
+    local ok, parser = pcall(vim.treesitter.get_parser, bufnr, "javascript", { error = false })
+    if not ok or not parser then
+        vim.treesitter.stop(bufnr)
+        vim.bo[bufnr].syntax = "http-nvim-scripts"
+        return
+    end
+    local function update()
+        if not vim.api.nvim_buf_is_loaded(bufnr) then
+            return
+        end
+        local regions, markers, comments = script_regions(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
+        -- No block: parse nothing rather than the whole buffer
+        parser:set_included_regions(#regions > 0 and regions or { { { 0, 0, 0, 0 } } })
+        vim.api.nvim_buf_clear_namespace(bufnr, scripts_ns, 0, -1)
+        for group, ranges in pairs({ httpNvimScriptsMarker = markers, httpNvimScriptsComment = comments }) do
+            for _, range in ipairs(ranges) do
+                vim.api.nvim_buf_set_extmark(bufnr, scripts_ns, range[1], range[2], {
+                    end_row = range[3],
+                    end_col = range[4],
+                    hl_group = group,
+                })
+            end
+        end
+    end
+    update()
+    -- Replaces the http highlighter that the filetype may have started
+    vim.treesitter.highlighter.new(parser)
+    local pending = false
+    vim.api.nvim_buf_attach(bufnr, false, {
+        on_lines = function()
+            if not pending then
+                pending = true
+                vim.schedule(function()
+                    pending = false
+                    update()
+                end)
+            end
+        end,
+    })
 end
 
 --- Lines of a scripts buffer: both blocks, empty ones too, each after a comment.
@@ -236,6 +337,7 @@ local function edit_scripts(owner, path)
         scripts_lines(owner, path == "" and "the collection" or "'" .. path .. "'"))
     vim.bo[bufnr].modified = false
     vim.b[bufnr].http_nvim_scripts = true
+    highlight_scripts(bufnr)
     open_edit_window()
     vim.api.nvim_set_current_buf(bufnr)
     state.script_bufs[owner] = bufnr
@@ -244,6 +346,7 @@ local function edit_scripts(owner, path)
     vim.api.nvim_create_autocmd("BufWriteCmd", {
         buffer = bufnr,
         callback = function()
+            fire_write(bufnr, "BufWritePre")
             local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
             local scripts, err, stray = jetbrains.script_blocks(lines, 1, #lines)
             if not scripts or stray then
@@ -256,6 +359,7 @@ local function edit_scripts(owner, path)
             -- On failure the buffer stays modified so the edit is not silently lost
             if write_collection(state.collection_path) then
                 vim.bo[bufnr].modified = false
+                fire_write(bufnr, "BufWritePost")
             end
             if state.split and state.split.bufnr and vim.api.nvim_buf_is_valid(state.split.bufnr) then
                 render()
@@ -338,11 +442,22 @@ edit = function()
     vim.api.nvim_create_autocmd("BufWriteCmd", {
         buffer = bufnr,
         callback = function()
+            fire_write(bufnr, "BufWritePre")
             local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
             local request, err, section, script, pre_script = jetbrains.from_lines(lines, node.request)
             if not request or not section then
                 vim.notify("http-nvim: " .. err, vim.log.levels.ERROR)
                 return
+            end
+            -- Only once the request reads fine: a failed save leaves the buffer as it was
+            if state.format_on_save then
+                lsp.format_bodies(bufnr)
+                lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+                request, err, section, script, pre_script = jetbrains.from_lines(lines, node.request)
+                if not request or not section then
+                    vim.notify("http-nvim: " .. err, vim.log.levels.ERROR)
+                    return
+                end
             end
             if section.start_row > 0 or section.end_row < #lines then
                 vim.api.nvim_buf_set_lines(bufnr, 0, -1, false,
@@ -363,6 +478,7 @@ edit = function()
             -- On failure the buffer stays modified so the edit is not silently lost
             if write_collection(state.collection_path) then
                 vim.bo[bufnr].modified = false
+                fire_write(bufnr, "BufWritePost")
             end
             if state.split and state.split.bufnr and vim.api.nvim_buf_is_valid(state.split.bufnr) then
                 render()

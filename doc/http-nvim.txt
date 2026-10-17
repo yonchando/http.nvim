@@ -87,7 +87,21 @@ lsp                 Completion in request edit buffers, from a language
                     `< {% %}` and `> {% %}` (in scripts buffers too),
                     and variable names in `client.global.get("")`. |K| (|vim.lsp.buf.hover()|) on a `{{key}}`
                     shows its value, masked when secret, or that it
-                    is disabled or not set. Completion plugins such as blink.cmp or
+                    is disabled or not set. A JSON body (`Content-Type`
+                    `application/json` or `...+json`, or no
+                    `Content-Type` and a body starting with `{` or `[`)
+                    is checked as you type: errors such as a trailing
+                    comma or an unquoted key, and warnings for comments
+                    and duplicate keys, show as diagnostics.
+                    |vim.lsp.buf.format()| (or a format-on-save plugin:
+                    edit buffers fire |BufWritePre| and |BufWritePost|
+                    on |:w|, so conform.nvim's `format_on_save` with
+                    `lsp_format = "fallback"` works) lays it out one key per line, indented by
+                    'shiftwidth' ('expandtab' for spaces), keeping the
+                    key order, values as written and comments. `{{key}}`
+                    counts as a value, also outside quotes
+                    (`"id": {{id}}`). A body with an error is not
+                    formatted. Completion plugins such as blink.cmp or
                     nvim-cmp pick it up as an LSP source; without one,
                     use |i_CTRL-X_CTRL-O|. Defaults to
                     `{ autotrigger = false }`; `false` turns it off.
@@ -97,6 +111,16 @@ lsp                 Completion in request edit buffers, from a language
 
     require("http-nvim").setup({
         lsp = { autotrigger = true },
+    })
+<
+format_on_save      Format the JSON body of a request when its edit
+                    buffer is saved with |:w|, the same way as
+                    |vim.lsp.buf.format()| (see `lsp` above), also with
+                    `lsp = false`. A body that is not valid JSON is
+                    saved as it is. Defaults to `true`. >lua
+
+    require("http-nvim").setup({
+        format_on_save = false,
     })
 <
 
@@ -181,7 +205,13 @@ Each key is described below.
                     buffer as it is now, and show the response.
                     `{{key}}` is replaced with the environment variable,
                     and `{{$name}}` with a dynamic variable
-                    (|http-nvim-dynamic|).
+                    (|http-nvim-dynamic|). The headers box shows the
+                    request headers, then the body as sent (with
+                    `{{key}}` replaced), then the response headers.
+                    When `Content-Type` is JSON (`application/json`, or
+                    a type ending in `+json`) and the body as sent isn't
+                    valid JSON (e.g. a trailing comma), a warning says
+                    where; the request is still sent.
 g?                  Open this help.
 <CR> or =           Expand or collapse the folder under the cursor.
 e                   Edit the request under the cursor as a `.http` file
@@ -239,6 +269,14 @@ vim-fugitive. Override any of them with |:highlight|.
   httpNvimScriptMark   `ƒ` after an item with scripts    links to Special
   httpNvimCut          Item cut with |x|                underlined
   httpNvimCopy         Item copied with |y|             links to httpNvimCut
+
+In scripts buffers (`S`, |http-nvim-scripts|), the code inside `< {% %}`
+and `> {% %}` is highlighted as JavaScript by tree-sitter (the `javascript`
+parser, `:TSInstall javascript`), or by Vim's JavaScript syntax when that
+parser isn't installed. These groups mark the rest:
+
+  httpNvimScriptsMarker   `< {%`, `> {%` and `%}`          links to PreProc
+  httpNvimScriptsComment  `# ...` lines                  links to Comment
 
 ==============================================================================
 6. RESPONSE HANDLER                           *http-nvim-response-handler*

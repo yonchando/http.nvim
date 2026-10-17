@@ -3,10 +3,12 @@
 --- values, cookie names from the collection's jar (in a `Cookie:` header and
 --- `response.cookiesByName("")`), the script API in `< {% %}` and `> {% %}`, and
 --- variable names in `client.global.get("")`, and shows the value of a
---- `{{key}}` on hover. It reads the buffer
---- straight from Neovim, so it doesn't track `didOpen`/`didChange`.
+--- `{{key}}` on hover. A JSON body gets diagnostics, on each change, and
+--- formatting (`vim.lsp.buf.format()`). It reads the buffer straight from
+--- Neovim: `didOpen`/`didChange` only say when to check it again.
 local cookies = require("http-nvim.cookies")
 local dynamic = require("http-nvim.dynamic")
+local json = require("http-nvim.json")
 local state = require("http-nvim.state")
 
 local kind = vim.lsp.protocol.CompletionItemKind
@@ -342,6 +344,138 @@ local function hover(params)
     end
 end
 
+--- The JSON body of each request in `lines`: from its first line after the
+--- headers to its last non-blank line before a `> ` handler or the next `###`.
+--- A body counts as JSON when `Content-Type` says so, or, without one, when it
+--- starts with `{` or `[`.
+---@param lines string[]
+---@return { first: integer, last: integer }[] bodies 1-based rows, inclusive
+local function json_bodies(lines)
+    local bodies = {}
+    local stage, content_type, first, last, in_script
+    local function finish()
+        if first and last then
+            local media = content_type and vim.trim(content_type:lower():match("^[^;]*"))
+            local starts = vim.trim(lines[first]):sub(1, 1)
+            if (media and media:match("[/+]json$")) or (not media and (starts == "{" or starts == "[")) then
+                table.insert(bodies, { first = first, last = last })
+            end
+        end
+        stage, content_type, first, last = "request", nil, nil, nil
+    end
+    finish()
+    for i, line in ipairs(lines) do
+        local text = vim.trim(line)
+        if line:match("^###") then
+            finish()
+        elseif in_script then
+            in_script = not line:find("%}", 1, true)
+        elseif stage == "request" then
+            if text:match("^<%s*{%%") then
+                in_script = not text:match("%%}$")
+            elseif text ~= "" and not text:match("^#") and not text:match("^//") then
+                stage = "headers"
+            end
+        elseif stage == "headers" then
+            if text == "" then
+                stage = "body"
+            else
+                local name, value = text:match("^([%w%-]+):%s*(.*)$")
+                if name and name:lower() == "content-type" then
+                    content_type = value
+                end
+            end
+        elseif stage == "body" then
+            if text:match("^>%s*%S") or text:match("^<>") then
+                stage = "done"
+            elseif text ~= "" then
+                first = first or i
+                last = i
+            end
+        end
+    end
+    finish()
+    return bodies
+end
+
+---@param lines string[]
+---@param body { first: integer, last: integer }
+---@return string
+local function body_text(lines, body)
+    return table.concat(vim.list_slice(lines, body.first, body.last), "\n")
+end
+
+--- Diagnostics for the JSON bodies of a buffer.
+---@param bufnr integer
+---@return lsp.Diagnostic[]
+local function diagnostics(bufnr)
+    if vim.b[bufnr].http_nvim_scripts then
+        return {}
+    end
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    local result = {}
+    for _, body in ipairs(json_bodies(lines)) do
+        local text = body_text(lines, body)
+        for _, problem in ipairs(json.check(text)) do
+            local line, col = json.position(text, problem.s)
+            local end_line, end_col = json.position(text, problem.e)
+            table.insert(result, {
+                range = {
+                    start = { line = body.first - 1 + line, character = col },
+                    ["end"] = { line = body.first - 1 + end_line, character = end_col + 1 },
+                },
+                severity = problem.warning and vim.lsp.protocol.DiagnosticSeverity.Warning
+                    or vim.lsp.protocol.DiagnosticSeverity.Error,
+                source = "http-nvim",
+                message = problem.message,
+            })
+        end
+    end
+    return result
+end
+
+--- Edits that format the JSON bodies; a body that is not valid JSON is left as is.
+---@param params lsp.DocumentFormattingParams
+---@return lsp.TextEdit[]
+local function format(params)
+    local bufnr = vim.uri_to_bufnr(params.textDocument.uri)
+    if not vim.api.nvim_buf_is_loaded(bufnr) or vim.b[bufnr].http_nvim_scripts then
+        return {}
+    end
+    local options = params.options or {}
+    local indent = options.insertSpaces == false and "\t" or (" "):rep(options.tabSize or 4)
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    local edits = {}
+    for _, body in ipairs(json_bodies(lines)) do
+        local text = body_text(lines, body)
+        local formatted = json.format(text, indent)
+        if formatted and formatted ~= text then
+            table.insert(edits, {
+                range = {
+                    start = { line = body.first - 1, character = 0 },
+                    ["end"] = { line = body.last - 1, character = #lines[body.last] },
+                },
+                newText = formatted,
+            })
+        end
+    end
+    return edits
+end
+
+--- Format the JSON bodies of an edit buffer in place, indented by its
+--- 'shiftwidth' ('expandtab' for spaces), as `vim.lsp.buf.format()` does.
+--- Works with the language server off too.
+---@param bufnr integer
+local function format_bodies(bufnr)
+    local edits = format({
+        textDocument = { uri = vim.uri_from_bufnr(bufnr) },
+        options = { tabSize = vim.lsp.util.get_effective_tabstop(bufnr), insertSpaces = vim.bo[bufnr].expandtab },
+    })
+    if #edits > 0 then
+        vim.lsp.util.apply_text_edits(edits, bufnr, "utf-8")
+    end
+end
+
 --- The `cmd` of the client: an in-process server.
 ---@param dispatchers vim.lsp.rpc.Dispatchers
 ---@return vim.lsp.rpc.PublicClient
@@ -357,6 +491,12 @@ local function server(dispatchers)
                         positionEncoding = "utf-8",
                         completionProvider = { triggerCharacters = { "{", ":", " ", ".", '"', "$" } },
                         hoverProvider = true,
+                        documentFormattingProvider = true,
+                        -- Only to hear about changes, for diagnostics: the text is read from the buffer
+                        textDocumentSync = {
+                            openClose = true,
+                            change = vim.lsp.protocol.TextDocumentSyncKind.Incremental,
+                        },
                     },
                     serverInfo = { name = "http-nvim" },
                 })
@@ -366,6 +506,9 @@ local function server(dispatchers)
             elseif method == "textDocument/hover" then
                 local ok, result = pcall(hover, params)
                 callback(nil, ok and result or nil)
+            elseif method == "textDocument/formatting" then
+                local ok, edits = pcall(format, params)
+                callback(nil, ok and edits or {})
             elseif method == "shutdown" then
                 callback(nil, nil)
             else
@@ -373,10 +516,22 @@ local function server(dispatchers)
             end
             return true, id
         end,
-        notify = function(method)
+        notify = function(method, params)
             if method == "exit" then
                 closing = true
                 dispatchers.on_exit(0, 15)
+            elseif method == "textDocument/didOpen" or method == "textDocument/didChange" then
+                local uri = params.textDocument.uri
+                -- After the change is in the buffer, and outside the client's send loop
+                vim.schedule(function()
+                    local bufnr = vim.uri_to_bufnr(uri)
+                    if closing or not vim.api.nvim_buf_is_loaded(bufnr) then
+                        return
+                    end
+                    local ok, result = pcall(diagnostics, bufnr)
+                    dispatchers.notification("textDocument/publishDiagnostics",
+                        { uri = uri, diagnostics = ok and result or {} })
+                end)
             end
             return true
         end,
@@ -403,4 +558,5 @@ end
 
 return {
     attach = attach,
+    format_bodies = format_bodies,
 }

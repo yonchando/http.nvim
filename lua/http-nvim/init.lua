@@ -56,6 +56,7 @@ end
 ---@field collection_dir string|nil Folder holding one folder per collection; defaults to `stdpath("data")/http-nvim/collections`
 ---@field keymaps table<string, HttpNvimKeys>|nil Keys per action, replacing the defaults in `keymaps.lua`; `false` unmaps
 ---@field lsp { autotrigger: boolean|nil }|false|nil Completion in request edit buffers; `autotrigger` opens Neovim's own menu while typing, `false` turns it off
+---@field format_on_save boolean|nil Format the JSON body when a request edit buffer is saved; defaults to true
 
 --- Configure the plugin. `collection_dir` may use `~` and environment variables.
 ---@param opts HttpNvimOptions|nil
@@ -63,11 +64,15 @@ M.setup = function(opts)
     opts = opts or {}
     vim.validate("collection_dir", opts.collection_dir, "string", true)
     vim.validate("lsp", opts.lsp, { "table", "boolean" }, true)
+    vim.validate("format_on_save", opts.format_on_save, "boolean", true)
     if opts.collection_dir then
         state.collection_dir = (vim.fn.fnamemodify(vim.fn.expand(opts.collection_dir), ":p"):gsub("/$", ""))
     end
     if opts.lsp ~= nil then
         state.lsp = opts.lsp and { autotrigger = type(opts.lsp) == "table" and opts.lsp.autotrigger == true } or false
+    end
+    if opts.format_on_save ~= nil then
+        state.format_on_save = opts.format_on_save
     end
     if opts.keymaps then
         keymaps.configure(opts.keymaps)
